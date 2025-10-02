@@ -1,0 +1,1415 @@
+---
+title: "23070164"
+author: ""
+output: 
+  pdf_document:
+    number_sections: false
+    toc: false
+geometry: a4paper, left=1.5cm, right=1.5cm, top=1.5cm, bottom=1.5cm
+
+header-includes:
+   - |
+    % --- Disable page numbers ---
+     \pagenumbering{gobble}
+     % --- Title adjustment ---
+     \setlength{\topskip}{0cm}            % Move content closer to the top of the page
+     \setlength{\headsep}{0.5cm}          % Adjust space between header and title
+     \setlength{\topmargin}{-1.5cm}       % Slightly move the title higher
+
+     % --- Compact document spacing ---
+     \renewcommand{\baselinestretch}{0.7}  
+     \setlength{\parskip}{0pt}             
+     \setlength{\parindent}{0pt}            
+
+     % --- Compact figure/table spacing ---
+     \setlength{\textfloatsep}{1pt}         
+     \setlength{\floatsep}{1pt}             
+     \setlength{\abovecaptionskip}{1pt}     
+     \setlength{\belowcaptionskip}{0pt}     
+
+     % --- Compact table row spacing ---
+     \renewcommand{\arraystretch}{0.7}
+
+     % --- Font size for summary output ---
+     \AtBeginDocument{
+       \let\oldverbatim\verbatim
+       \let\endoldverbatim\endverbatim
+       \renewenvironment{verbatim}
+         {\scriptsize\oldverbatim}          % Use \scriptsize (or \tiny) to shrink summary output
+         {\endoldverbatim}
+
+       % --- Smaller font for echoed code ---
+       \newcommand{\echoCodeStart}{\tiny\vspace{-0.3pt}}
+       \newcommand{\echoCodeEnd}{\vspace{-0.3pt}}
+     }
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  fig.width = 8.5, 
+  comment = "", 
+  tidy = FALSE,
+  warning = FALSE,     # Suppress warnings globally
+  message = FALSE
+)
+options(width = 90) 
+suppressMessages(library(ggplot2))
+suppressMessages(library(dplyr))
+suppressMessages(library(gridExtra))
+set.seed(123)
+
+```
+
+# Question 1
+
+## (a) Research Question
+This study investigates how socio-economic and demographic factors impact house prices (MedianHousePrice) in London boroughs. By analyzing these relationships, we can provide valuable insights for policymakers, investors, and urban planners to address housing affordability and optimize urban development.
+
+## (b) Exploratory Analysis of the Data
+
+### Introducing the Dataset (Dataset Overview) and Checking & Handling Missing Data
+
+```{r missing-data-overview, echo=FALSE, message=FALSE}
+
+# --- Step 1: Dataset Overview (No Output) ---
+# Load the dataset
+housing_data <- read.csv("HousingData.csv")
+
+# Get the dimensions of the dataset (entries and variables)
+num_entries <- nrow(housing_data)     # Number of rows (observations)
+num_variables <- ncol(housing_data)   # Number of columns (features)
+
+# Identify numeric and categorical variables (for internal use only)
+numeric_vars <- names(housing_data)[sapply(housing_data, is.numeric)]         # Numeric variables
+categorical_vars <- names(housing_data)[sapply(housing_data, is.character)]   # Categorical variables
+
+# --- Step 2: Missing Data Analysis ---
+# Calculate the number and percentage of missing values for each variable
+missing_counts <- colSums(is.na(housing_data))                                # Count of missing values per variable
+missing_percentages <- (missing_counts / num_entries) * 100                   # Missing values as percentages
+
+# Filter only the variables that have missing data
+missing_vars <- missing_counts[missing_counts > 0]
+
+# Create a summary table for missing data
+missing_table <- data.frame(
+  Variable = names(missing_vars),                          # Name of the variable
+  Missing_Count = missing_vars,                            # Count of missing entries
+  Missing_Percentage = round(missing_percentages[names(missing_vars)], 2)     # Percentage of missing values
+)
+
+# --- Step 4: Handle Missing Data ---
+# Impute missing values for all numeric variables using their column mean
+for (var in numeric_vars) {
+  housing_data[[var]][is.na(housing_data[[var]])] <- mean(housing_data[[var]], na.rm = TRUE)
+}
+
+# Check if all missing values have been resolved
+remaining_missing <- colSums(is.na(housing_data))
+
+```
+The dataset contains 33 entries (London boroughs) and 16 variables. The primary variable of interest is MedianHousePrice, which represents the median property price in each borough. Several variables have missing data: MalePay is The variable with the highest missing values (7 out of 33, or 21.2%). Then Variables like FemalePay (9.09%) and others with minimal missing data (<5%, e.g., CrimePerThous, PercentBornAbroad). All missing values across the dataset were addressed using mean imputation. 
+The following are the variable descriptions used in this research:
+**PopDens** (Population density, 2016), **AverageAge** (Average age, 2016), **PercentBornAbroad** (% born abroad, 2014), **PercentBAME** (% BAME population, 2013), **MaleEmployment** (Male employment rate, 2015), **FemaleEmployment** (Female employment rate, 2015), **MalePay** (Male annual pay, 2015), **FemalePay** (Female annual pay, 2015), **CrimePerThous** (Crime rate per 1,000, 2014/15), **MedianHousePrice** (Median house price, 2014/15), **MaleLifeExpectancy** (Male life expectancy, 2012-14), **FemaleLifeExpectancy** (Female life expectancy, 2012-14), **LifeSatisfaction** (Life satisfaction score, 2011-14), **ChildhoodObesityPrev** (Childhood obesity %, 2013/14), **MortalityPreventable** (Preventable mortality rate, 2012-14).
+
+### Correlation Analysis and Summary Statistics
+
+To highlight and identify which variables have the strongest relationship with **MedianHousePrice**, we calculate the correlation and create a correlogram. This visualization makes it easy to identify key predictors at a glance.
+
+```{r combined-plots, echo=FALSE, fig.height=2}
+
+# --- Step 1: Calculate and Print Correlation Matrix ---
+# Select numeric variables from the dataset
+numeric_vars <- housing_data[sapply(housing_data, is.numeric)]
+
+# Calculate the correlation matrix
+cor_matrix <- cor(numeric_vars)
+
+# Extract correlations with MedianHousePrice and round to two decimal places
+cor_target <- round(cor_matrix["MedianHousePrice", ], 2)
+
+# --- Step 2: Prepare Correlogram Data ---
+# Convert correlations to a data frame for visualization
+cor_df <- data.frame(Variable = names(cor_target), Correlation = cor_target)
+
+# Order variables by absolute correlation value for better readability
+cor_df <- cor_df[order(abs(cor_df$Correlation), decreasing = TRUE), ]
+
+
+# --- Step 3: Plot Correlogram ---
+
+ggplot(cor_df, aes(x = reorder(Variable, Correlation), y = Correlation, fill = Correlation)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "Correlogram of Variables with MedianHousePrice",
+       x = "Variables", y = "Correlation") +
+  theme_minimal(base_size = 7) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 7, face = "bold")
+  )
+
+
+# --- Step 4: Subset Data and Generate Summary Statistics ---
+# Define variables with moderate to strong correlations to summarize
+variables_to_summarize <- c("CrimePerThous", "FemalePay", "FemaleLifeExpectancy", 
+                            "MalePay", "MaleLifeExpectancy", "PopDens", "MedianHousePrice")
+
+# Subset the relevant data from the dataset
+relevant_data <- housing_data[, variables_to_summarize]
+
+
+# Step 5: Generate summary statistics
+cat("Summary Statistics for MedianHousePrice:\n")
+summary_stats <- summary(relevant_data$MedianHousePrice)
+print(summary_stats)
+
+```
+### Summary and Interpretation of Results
+
+House prices in London boroughs range from £215,000 to £1,195,000, with a mean of £429,029, showing wide disparities. CrimePerThous ($r = 0.64$), FemalePay, and FemaleLifeExpectancy strongly correlate with prices, reflecting the influence of urbanization, income, and living conditions. Moderate correlations with MalePay ($r = 0.44$), MaleLifeExpectancy ($r = 0.46$), and population density ($r = 0.44$) suggest smaller but still relevant effects. Urban areas with higher density and better living standards tend to have higher prices, making these factors key in regression modeling.
+
+
+## (c) Assumption Checks and Linear Model Fitting
+
+Before scaling and fitting the linear model, it is important to check the assumption of variable correlation using the raw data to ensure the analysis reflects the original dataset. The procedures as follows:
+
+### 1. Normality of Residuals (Assumption Checks)
+
+Initial tests (Q-Q Plot, Shapiro-Wilk p-value: 1.28e-05) revealed non-normal residuals caused by outliers in rows 1 and 20. Removing these reduced the dataset to 31 observations. The Shapiro-Wilk p-value improved to 0.3455, indicating normal residuals and meeting the regression model's normality assumption.
+
+```{r shapiro-checks, echo=FALSE}
+
+# Fit initial linear model
+linear_model <- lm(MedianHousePrice ~ CrimePerThous + FemalePay + FemaleLifeExpectancy + 
+                   MalePay + MaleLifeExpectancy + PopDens, 
+                   data = housing_data)
+# Identify and remove outliers
+residuals <- resid(linear_model)
+outlier_indices <- order(abs(residuals), decreasing = TRUE)[1:2]
+housing_data_clean <- housing_data[-outlier_indices, ]
+
+linear_model_clean <- lm(MedianHousePrice ~ CrimePerThous + FemalePay + FemaleLifeExpectancy + 
+                         MalePay + MaleLifeExpectancy + PopDens, 
+                         data = housing_data_clean)
+
+# Shapiro-Wilk test for normality
+shapiro_test <- shapiro.test(resid(linear_model))
+cat("Shapiro-Wilk Test p-value (Before Outlier Removal):", shapiro_test$p.value, "\n")
+
+
+# Check normality again
+shapiro_test_clean <- shapiro.test(resid(linear_model_clean))
+cat("Shapiro-Wilk Test p-value (After Outlier Removal):", shapiro_test_clean$p.value, "\n")
+```
+
+```{r assumption-checks, echo=FALSE,  fig.height=2.5}
+
+# Q-Q Plots (Before and After Outlier Removal)
+par(mfrow = c(1, 2))
+qqnorm(resid(linear_model), main = "Q-Q Plot: Before Outlier Removal")
+qqline(resid(linear_model), col = "red")
+
+
+qqnorm(resid(linear_model_clean), main = "Q-Q Plot: After Outlier Removal")
+qqline(resid(linear_model_clean), col = "blue")
+par(mfrow = c(1, 1))
+
+```
+
+### 2. Linearity, Homoscedasticity and Multicollinearity (Assumption Checks)
+```{r assumption-tests-combined, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Function to calculate residual-predicted correlation for linearity
+linearity_test <- function(model) {
+  residuals <- resid(model)
+  predicted <- fitted(model)
+  cor(residuals, predicted)
+}
+
+# Function to calculate VIF
+calculate_vif <- function(model) {
+  X <- model.matrix(model)[, -1]
+  vif_vals <- sapply(1:ncol(X), function(i) {
+    vif_model <- lm(X[, i] ~ X[, -i])
+    r_squared <- summary(vif_model)$r.squared
+    1 / (1 - r_squared)
+  })
+  names(vif_vals) <- colnames(X)
+  vif_vals
+}
+
+# Perform Breusch-Pagan test for homoscedasticity
+bp_test <- function(model) {
+  residuals_squared <- resid(model)^2
+  fitted_vals <- fitted(model)
+  auxiliary_model <- lm(residuals_squared ~ fitted_vals)
+  n <- length(residuals_squared)
+  R_squared <- summary(auxiliary_model)$r.squared
+  p_value <- 1 - pchisq(n * R_squared, 1)
+  p_value
+}
+
+# Linearity test result
+linearity_corr <- linearity_test(linear_model_clean)
+
+# VIF results
+vif_results <- calculate_vif(linear_model_clean)
+
+# Breusch-Pagan test for homoscedasticity
+bp_p_value <- bp_test(linear_model_clean)
+
+# Summarize results
+assumption_summary <- data.frame(
+  Test = c("Linearity", "Homoscedasticity", "Multicollinearity (VIF)"),
+  Result = c(
+    paste("Correlation =", round(linearity_corr, 4)),
+    paste("Breusch-Pagan p-value =", round(bp_p_value, 4)),
+    paste("Max VIF =", round(max(vif_results), 2))
+  ),
+  Satisfied = c(
+    ifelse(abs(linearity_corr) < 0.15, "Yes", "No"),
+    ifelse(bp_p_value > 0.05, "Yes", "No"),
+    ifelse(max(vif_results) < 10, "Yes", "No")
+  )
+)
+
+# Display the summary table
+print(assumption_summary)
+
+```
+### Interpretation of Linearity, Homoscedasticity and Multicollinearity
+
+- Linearity: Relationship between predictors and response is approximately linear.
+- Homoscedasticity: Breusch-Pagan test confirms constant variance (\( p = 0.41 \)).
+- Multicollinearity:
+  - High VIF for `MaleLifeExpectancy` (\( 9.67 \)) and `FemaleLifeExpectancy` (\( 6.38 \)).
+  - These variables may require removal or regularization (e.g., Lasso).
+
+### Conclusion: All assumptions are satisfied. No transformations are required.
+
+### 3. Scaling Data and Fit Linear Model
+
+```{r , echo=FALSE}
+# --- Step 1: Prepare Dataset ---
+# Start with the cleaned dataset after outlier removal
+scaled_housing_data <- housing_data_clean  
+
+# --- Step 2: Define columns to scale ---
+scaled_predictors <- c("CrimePerThous", "FemalePay", "FemaleLifeExpectancy", 
+                       "MalePay", "MaleLifeExpectancy", "PopDens")
+
+# Ensure all specified predictors exist in the dataset to prevent errors
+scaled_predictors <- scaled_predictors[scaled_predictors %in% names(scaled_housing_data)]
+
+# --- Step 3: Scale only the selected predictors ---
+# Apply scaling to the predictors and overwrite them in scaled_housing_data
+scaled_housing_data[, scaled_predictors] <- scale(scaled_housing_data[, scaled_predictors])
+
+```
+
+```{r , echo=TRUE}
+# Fit the full linear model using all predictors
+linear_model_scaled <- lm(MedianHousePrice ~ CrimePerThous + FemalePay + FemaleLifeExpectancy + 
+                          MalePay + MaleLifeExpectancy + PopDens, data = scaled_housing_data)
+# Display the summary of the full model
+summary(linear_model_scaled)
+
+```
+
+### Interpretation of Linear Model
+
+The model explains 90.4\% of the variability in MedianHousePrice, with an adjusted $R^2$ of 88\%, indicating a strong fit. Significant predictors—CrimePerThous, FemalePay, and PopDens—suggest urban demand drives higher prices. Weaker or non-significant effects are seen for MalePay and life expectancy. Residual diagnostics confirm normality and homoscedasticity, highlighting socioeconomic and urban factors as key drivers of house prices across London boroughs.
+
+## (d) Perform Stepwise Regression
+
+```{r , echo=FALSE,  fig.width = 10 }
+
+# --- Step 1: Define a Function to Extract Model Metrics --- #
+extract_metrics <- function(model, method) {
+  # Get predictors excluding intercept and clean names
+  predictors <- names(coef(model))[-1]
+  cleaned_predictors <- gsub("[,/]", " ", paste(predictors, collapse = " "))  # Remove symbols like / and ,
+
+  # Extract key metrics
+  adj_r2 <- round(summary(model)$adj.r.squared, 4)
+  aic_val <- round(AIC(model), 2)
+  bic_val <- round(BIC(model), 2)
+
+  # Return data frame with reordered columns
+  return(data.frame(
+    Method = method,
+    AdjR2 = adj_r2,
+    AIC = aic_val,
+    BIC = bic_val,
+    Predictors = cleaned_predictors
+  ))
+}
+
+# --- Step 2: Fit Stepwise Models --- #
+models_aic <- list(
+  "Both_Dir" = step(linear_model_scaled, direction = "both", trace = FALSE),
+  "Forward"  = step(linear_model_scaled, direction = "forward", trace = FALSE),
+  "Backward" = step(linear_model_scaled, direction = "backward", trace = FALSE)
+)
+
+models_bic <- list(
+  "Both_Dir" = step(linear_model_scaled, direction = "both", k = log(nrow(scaled_housing_data)), trace = FALSE),
+  "Forward"  = step(linear_model_scaled, direction = "forward", k = log(nrow(scaled_housing_data)), trace = FALSE),
+  "Backward" = step(linear_model_scaled, direction = "backward", k = log(nrow(scaled_housing_data)), trace = FALSE)
+)
+
+# --- Step 3: Extract and Combine Metrics --- #
+results_aic <- do.call(rbind, lapply(names(models_aic), function(method) {
+  # Remove the "(AIC)" label here
+  extract_metrics(models_aic[[method]], method)
+}))
+
+results_bic <- do.call(rbind, lapply(names(models_bic), function(method) {
+  # Remove the "(BIC)" label here
+  extract_metrics(models_bic[[method]], method)
+}))
+
+summary_table <- rbind(results_aic, results_bic)
+
+# --- Step 4: Select and Display the Top Two Models --- #
+# Prioritize by AdjR2, then AIC, then BIC
+best_models <- summary_table[order(-summary_table$AdjR2, summary_table$AIC, summary_table$BIC), ][1:2, ]
+
+cat("--- Top Two Stepwise Models ---")
+print(best_models, row.names = FALSE)
+
+
+```
+### Interpretation
+
+Stepwise regression found that both directions and backward elimination selected CrimePerThous, FemalePay, FemaleLifeExpectancy, and PopDens, while forward selection included weaker predictors like MalePay and MaleLifeExpectancy. Both directions and backward elimination achieved an adjusted $R^2$ of 0.8852 with lower AIC (763.75) and BIC (772.36) than forward selection. These models are preferred for their simplicity and superior performance.
+
+## (e) Stepwise Model Suggestion and Model Refinement
+
+```{r , echo=FALSE, fig.height= 3 }
+
+# --- Step 1: Define and Fit the Base Model --- #
+# Base model fitted with significant predictors from stepwise regression
+stepwise_both <- lm(MedianHousePrice ~ CrimePerThous + FemalePay + 
+                    FemaleLifeExpectancy + PopDens, data = scaled_housing_data)
+
+print(summary(stepwise_both))
+
+# --- Step 2: Check Linearity for Each Predictor to check refined model resulted from Stepwise--- #
+# Display Updated Linearity Check Plots  #
+# Set up the plotting layout to have 2 plots side by side
+
+par(mfrow = c(1, 2))
+
+# Plot residuals vs. FemalePay
+plot(scaled_housing_data$FemalePay, resid(stepwise_both), 
+     main = "Residuals vs. FemalePay", xlab = "FemalePay", ylab = "Residuals", pch = 19)
+abline(h = 0, col = "red")
+
+# Plot residuals vs. PopDens
+plot(scaled_housing_data$PopDens, resid(stepwise_both), 
+     main = "Residuals vs. PopDens", xlab = "PopDens", ylab = "Residuals", pch = 19)
+abline(h = 0, col = "red")
+
+# Reset plot layout
+par(mfrow = c(1, 1))
+
+
+```
+
+```{r , echo=TRUE}
+# --- Step 3: Define and Fit Model Refinement --- #
+# Apply polynomial transformation to variables that show non-linear patterns
+stepwise_refined <- lm(MedianHousePrice ~ CrimePerThous + poly(FemalePay, 2) + 
+                    FemaleLifeExpectancy +PopDens,data = scaled_housing_data)
+```
+
+```{r , echo=FALSE }
+# --- Step 4: Display Model Refinement Summary --- #
+print(summary(stepwise_refined))
+
+```
+### Interpretation of Stepwise Model Suggestion
+
+The base linear model explains 90.05\% of the variability in MedianHousePrice, achieving an adjusted R^2 \text{ of 0.8852.}
+Key predictors such as CrimePerThous, FemalePay, and FemaleLifeExpectancy are highly significant, while PopDens has a weaker but still significant effect. Residuals deviate by approximately \( \pm 48,730 \), indicating good predictive capability.
+The refined model improves performance, explaining 91.68\% of the variability with an adjusted } R^2 \text{ of 0.9002.}
+The standard error of residuals decreases to \( 45,440 \), with a non-linear effect for FemalePay. As FemalePay increases, its positive impact on housing prices diminishes, reflecting affordability constraints at higher income levels. This suggests that small increases in pay can significantly impact housing prices in lower-income regions, while in wealthier areas, further income increases yield reduced effects. 
+
+## (f) Lasso Regression Function
+
+```{r , echo=TRUE}
+
+# --- Lasso Regression Algorithm ---
+# Step 1: Initialize the function to take y (response), X (predictors), 
+# and lambda_values (penalty grid).
+# Step 2: Create an empty matrix to store the coefficients for each lambda.
+# Step 3: For each lambda value:
+#         a. Define the lasso loss function (RSS + L1 penalty).
+#         b. Calculate RSS: Sum of squared residuals between actual y 
+#            and predicted values.
+#         c. Add penalty: L1 regularization to encourage sparsity.
+#         d. Minimize the loss using the `nlm` optimization function to 
+#            find the optimal coefficients.
+# Step 4: Return a matrix of coefficients for each lambda, labeled by variable 
+#            names and lambda values.
+
+# --- Define the LassoRegression Function ---
+LassoRegression <- function(y, X, lambda_values) {
+  
+  # --- Step 1: Initialize variables ---
+  n <- nrow(X)               # Number of observations (rows in X)
+  p <- ncol(X)               # Number of predictors (columns in X)
+  
+  # Matrix to store the coefficients (including intercept) for each lambda value
+  coefficients <- matrix(0,   
+                         nrow = length(lambda_values), 
+                         ncol = p + 1)  # +1 for the intercept column
+
+  # --- Step 2: Loop through each lambda value ---
+  for (i in seq_along(lambda_values)) {
+    lambda <- lambda_values[i]  # Select the current lambda
+
+    # --- Step 3: Define the loss function ---
+    # This function computes the lasso objective: RSS + L1 penalty
+    loss_function <- function(beta) {
+      beta_0 <- beta[1]          # Intercept term (beta_0)
+      beta_rest <- beta[-1]       # Remaining coefficients
+      
+      # --- Step 4: Calculate RSS ---
+      rss <- sum((y - (beta_0 + X %*% beta_rest))^2)  # Residual Sum of Squares
+      
+      # --- Step 5: Apply L1 penalty ---
+      penalty <- lambda * sum(abs(beta_rest))  # Note: Intercept is NOT penalized
+      
+      # --- Step 6: Return total loss ---
+      return(rss + penalty)
+    }
+
+    # --- Step 7: Optimize the loss function ---
+    # Use nlm to minimize the loss function, starting from zero-initialized coefficients
+    optimized_result <- nlm(f = loss_function, 
+                            p = rep(0, p + 1),  # Initial guess 
+                                                #(all coefficients set to zero)
+                            iterlim = 500)      # Set a maximum iteration limit
+
+    # --- Step 8: Store optimized coefficients ---
+    coefficients[i, ] <- optimized_result$estimate
+  }
+  
+  # --- Step 9: Label the coefficient matrix ---
+  colnames(coefficients) <- c("Intercept", colnames(X))  # Add column names for 
+                                                         # variables
+  rownames(coefficients) <- paste0("Lambda_", lambda_values)  # Label rows with 
+                                                              #lambda values
+  
+  # --- Step 10: Return the final matrix of coefficients ---
+  return(coefficients)
+}
+
+# --- End of LassoRegression Function ---
+
+#Lets test the function by simulating the data
+
+# --- Step 1: Simulate Data ---
+# Generate a matrix X (50 observations, 5 predictors) and a response vector y
+set.seed(42)  # Ensure reproducibility
+n_obs <- 50    # Number of observations
+n_pred <- 5    # Number of predictors
+
+# Generate predictors and response variable
+X_sim <- matrix(rnorm(n_obs * n_pred), nrow = n_obs, ncol = n_pred)
+colnames(X_sim) <- paste0("X", 1:n_pred)  # Assign predictor names
+
+# Define true coefficients, including some zeros to simulate sparsity
+true_beta <- c(3, -2, 0, 1.5, 0)  # Sparse true coefficients
+y_sim <- X_sim %*% true_beta + rnorm(n_obs, mean = 0, sd = 0.5)  # Add noise to response
+
+# --- Step 2: Define lambda values ---
+# Test different levels of penalization
+lambda_test_values <- c(0.1, 1, 10, 100, 1000)
+
+# --- Step 3: Apply Lasso Regression Function ---
+lasso_results_sim <- LassoRegression(y = y_sim, X = X_sim, lambda_values = lambda_test_values)
+
+# --- Step 4: Display and Verify Results ---
+cat("\nLasso Regression Coefficients for Simulated Data:\n")
+print(round(lasso_results_sim, 4))
+
+
+```
+* The Lasso regression function successfully shrinks all coefficients to zero for sufficiently large $\lambda$ values, 
+confirming correct implementation of the penalty mechanism. This demonstrates that the function effectively applies 
+L1 regularization and performs variable selection as expected.
+
+## (g) Applying Lasso Regression
+
+```{r , echo=FALSE}
+
+# --- Pseudo-Code Explanation ---
+# Step 1: Define the objective
+#   - Use cross-validation to fine-tune lambda for Lasso regression.
+#   - We'll explore a wide range of lambda values to handle both under- and over-regularization.
+#   - The optimal lambda is selected based on the lowest mean squared error (MSE).
+
+# Step 2: Prepare data
+#   - Extract predictors (X) and the response variable (y) from the dataset.
+#   - Convert predictors to a numeric matrix and the response to a numeric vector.
+
+# Step 3: Define candidate lambda values
+#   - Use a log-scale range for lambda between 10^-5 and 10^6.
+#   - This range ensures both small and large penalties are tested.
+
+# Step 4: Perform 5-fold cross-validation
+#   - Randomly split data into 5 folds.
+#   - Train the Lasso model on 4 folds and test on the remaining fold.
+#   - Compute MSE for each fold and lambda, and return the average MSE.
+
+# Step 5: Identify the optimal lambda
+#   - Choose the lambda with the lowest average MSE from cross-validation.
+
+# Step 6: Select five lambda values for further testing
+#   - Use a range around the optimal lambda for additional analysis.
+
+# Step 7: Apply Lasso regression to these five lambda values
+#   - Extract and display the coefficients for interpretation.
+
+# Step 8: Compare results with other models
+#   - Fit a linear model and stepwise regression for reference and comparison.
+
+#===============================================================================
+set.seed(123)
+# --- Step 1: Define data ---
+X <- scaled_housing_data[, c("CrimePerThous", "FemalePay", "FemaleLifeExpectancy",
+                             "MalePay", "MaleLifeExpectancy", "PopDens")]
+y <- scaled_housing_data$MedianHousePrice
+
+# --- Step 2: Format data ---
+X <- as.matrix(X)  # Convert predictors to a numeric matrix
+y <- as.numeric(y)  # Convert response to a numeric vector
+
+# --- Step 3: Define lambda candidates ---
+lambda_candidates <- 10^seq(-5, 6, length.out = 100)  # Wide range to explore
+
+# --- Step 4: Perform cross-validation ---
+cv_mse <- sapply(lambda_candidates, function(lambda) {
+  folds <- sample(rep(1:5, length.out = nrow(X)))  # Randomly assign folds
+  mse_values <- numeric(5)  # Initialize MSE storage
+
+  for (fold in 1:5) {
+    # Split data into training and testing for this fold
+    X_train <- X[folds != fold, , drop = FALSE]
+    y_train <- y[folds != fold]
+    X_test <- X[folds == fold, , drop = FALSE]
+    y_test <- y[folds == fold]
+
+    # Apply Lasso regression and predict
+    beta <- LassoRegression(y_train, X_train, lambda)
+    y_pred <- as.vector(cbind(1, X_test) %*% as.numeric(beta))
+
+    # Calculate mean squared error for the fold
+    mse_values[fold] <- mean((y_test - y_pred)^2)
+  }
+
+  mean(mse_values)  # Return average MSE for this lambda
+})
+
+# --- Step 5: Find optimal lambda ---
+optimal_lambda <- lambda_candidates[which.min(cv_mse)]
+
+# --- Step 6: Define lambda values around optimal ---
+lambda_values <- c(optimal_lambda / 10, optimal_lambda / 2, optimal_lambda,
+                   optimal_lambda * 2, optimal_lambda * 10)
+
+# --- Step 7: Apply Lasso regression ---
+lasso_results <- lapply(lambda_values, function(lambda) LassoRegression(y, X, lambda))
+names(lasso_results) <- paste0("Lambda_", round(lambda_values, 4))
+
+# --- Step 8: Extract coefficients ---
+lasso_coefficients <- sapply(lasso_results, function(model) model)
+rownames(lasso_coefficients) <- c("(Intercept)", "CrimePerThous", "FemalePay", 
+                                  "FemaleLifeExpectancy", "MalePay", 
+                                  "MaleLifeExpectancy", "PopDens")
+
+# --- Step 9: Compare with other models ---
+# Fit original linear model
+original_model <- lm(MedianHousePrice ~ CrimePerThous + FemalePay + FemaleLifeExpectancy +
+                     MalePay + MaleLifeExpectancy + PopDens, data = scaled_housing_data)
+original_coefficients <- coef(original_model)
+
+# Assume stepwise coefficients are available from previous analysis
+stepwise_coefficients <- coef(stepwise_both)
+
+# --- Step 10: Combine results into a single data frame ---
+# Convert all results to data frames
+lasso_results_df <- as.data.frame(lasso_coefficients)
+colnames(lasso_results_df) <- names(lasso_results)
+lasso_results_df$Predictor <- rownames(lasso_results_df)
+
+original_model_df <- data.frame(
+  Predictor = names(original_coefficients),
+  Original = as.numeric(original_coefficients)
+)
+
+stepwise_model_df <- data.frame(
+  Predictor = names(stepwise_coefficients),
+  Stepwise = as.numeric(stepwise_coefficients)
+)
+
+# Merge the data frames by the 'Predictor' column
+final_results_df <- Reduce(function(x, y) merge(x, y, by = "Predictor", all = TRUE),
+                           list(lasso_results_df, original_model_df, stepwise_model_df))
+
+# --- Output summary ---
+cat("\n--- Optimal Lambda from Cross-Validation ---\n")
+print(optimal_lambda)
+
+cat("\n--- Final Summary of Coefficients ---\n")
+print(final_results_df)
+
+```
+### Rationale for Regularization and Lambda Tuning  
+* Prior tests using $\lambda = 10^{7}$ led to all coefficients except the intercept shrinking to zero, confirming the need for a balanced approach to penalty strength.  
+
+* The wide tuning range ($10^{-5}$ to $10^{6}$) identified an optimal lambda through cross-validation, ensuring effective regularization while maintaining predictive accuracy.
+
+* The Lasso regression model, optimized at $\lambda = 464.16$ via cross-validation, reveals key findings compared to both the original and stepwise models. Even under strong regularization (up to $\lambda = 4641.59$), no predictors were fully shrunk to zero, indicating robust associations with the response variable.
+
+* In model comparisons, the original linear model showed large, potentially unstable coefficients (e.g., CrimePerThous: $52459.35$), suggesting overfitting. The stepwise model, while simpler, retained multicollinearity issues despite smaller coefficients (e.g., CrimePerThous: $51607.49$). In contrast, Lasso balanced accuracy and simplicity with regularized, stable coefficients (e.g., CrimePerThous: $712$).
+
+* Cross-validation confirmed that $\lambda = 464.16$ minimizes MSE, improving generalization without sacrificing interpretability. Lasso regression effectively handles complex data with multicollinearity, offering both stability and predictive performance.
+
+
+## (h) Conclusion
+
+* The choice of the best model depends on both interpretability and predictive performance, particularly considering multicollinearity.
+The **Lasso regression** emerges as the best model due to its balanced handling of complexity and predictive accuracy.
+
+* The **original model** retains all variables, including MaleLifeExpectancy and FemaleLifeExpectancy, which have high VIF values ($9.67$ and $6.38$, respectively). This indicates significant multicollinearity, causing instability in large coefficients like $26384.97$ and $31676.09$. Despite achieving a high $R^2$ of $0.90$, the model risks overfitting and poor generalization.
+
+* **Stepwise regression**, by contrast, removes high-VIF predictors (MalePay and MaleLifeExpectancy), making non-linear effects clearer. FemaleLifeExpectancy's coefficient increases to $50221.86$, reflecting reduced multicollinearity's impact. However, adjusted $R^2$ falls slightly to $0.89$, highlighting a trade-off between simplicity and explanatory power.
+
+* In **Lasso regression**, predictors are retained but their coefficients are regularized. Under $\lambda \approx 464$, MaleLifeExpectancy and FemaleLifeExpectancy have reduced coefficients ($222.73$ and $490.92$), indicating weaker influence. This regularization enhances model stability and resilience to unseen data. Lasso achieves strong predictive performance with improved generalization, making it the optimal model for managing complex, multicollinear datasets.
+
+
+
+\newpage
+
+# Question 2
+### (a) Exploratory Analysis
+This analysis explores the factors affecting diabetes among Pima Indian women using logistic regression (dataset from Kaggle). The dataset consists of 768 observations and 9 variables. The initial phase involves summarizing the dataset and visualizing key features to detect patterns and potential data issues.
+
+### Handling Missing Values Using Mean Imputation
+Certain variables contain zero values that should be treated as missing because it is not logically approved in real life such as `Glucose`, `BloodPressure`, `SkinThickness`, `Insulin`, `Age`, and `BMI`. To ensure accurate analysis, we replace these values with the mean of their respective columns **before** proceeding with summary statistics. 
+```{r , echo=FALSE}
+# Step 1: Load the dataset
+diabetes_data <- read.csv("diabetes.csv")
+
+# Step 2: Replace zeros with NA for specific variables
+treat_as_missing <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "Age")
+diabetes_data[treat_as_missing] <- lapply(diabetes_data[treat_as_missing], function(x) ifelse(x == 0, NA, x))
+
+# Step 3: Impute missing values using mean
+diabetes_data[treat_as_missing] <- lapply(diabetes_data[treat_as_missing], function(x) ifelse(is.na(x), mean(x, na.rm = TRUE), x))
+```
+### Dataset Summary, Checking Zero Values, and Correlation with Outcome
+```{r , echo=FALSE}
+
+# Step 4: Define a function to get summary statistics, correlation, and additional information
+summary_stats_with_corr <- function(data) {
+  # Compute correlations with Outcome
+  cor_matrix <- cor(data[, sapply(data, is.numeric)], use = "complete.obs")
+  cor_with_outcome <- cor_matrix["Outcome", ]
+  
+  # Step 5:Generate the summary table
+  stats <- data.frame(
+    Variable = names(data),      
+    Mean = sapply(data, function(x) if (is.numeric(x)) mean(x, na.rm = TRUE) else NA),
+    Median = sapply(data, function(x) if (is.numeric(x)) median(x, na.rm = TRUE) else NA),
+    Q1 = sapply(data, function(x) if (is.numeric(x)) quantile(x, 0.25, na.rm = TRUE) else NA),  # First Quartile
+    Q3 = sapply(data, function(x) if (is.numeric(x)) quantile(x, 0.75, na.rm = TRUE) else NA),  # Third Quartile
+    Zero_Values = sapply(data, function(x) sum(x == 0, na.rm = TRUE)), # Count of zero values
+    Correlation= ifelse(names(data) %in% names(cor_with_outcome),
+                                      round(cor_with_outcome[names(data)], 4), NA)  # Correlation column
+  )
+  return(stats)
+}
+
+# Step 6: Call the function on the dataset
+result_summary <- summary_stats_with_corr(diabetes_data)
+
+# Step 7: Print the result
+print(result_summary, row.names = FALSE)
+
+
+```
+
+```{r , echo=FALSE}
+  # Step 1: Generate a concise output for the proportion table
+outcome_counts <- table(diabetes_data$Outcome)
+outcome_proportions <- prop.table(outcome_counts)
+
+# Step 2:Print the results as a single-line string
+cat("Outcome Counts: ", paste(names(outcome_counts), outcome_counts, sep = "=", collapse = ", "), "\n")
+cat("Proportions: ", paste(names(outcome_proportions), round(outcome_proportions, 4), sep = "=", collapse = ", "), "\n")
+
+```
+### Observations
+**Class Distribution:** The dataset is not perfectly balanced, with 65.1% of cases being non-diabetic (Outcome = 0) and 34.9% being diabetic (Outcome = 1). While this distribution is not extremely imbalanced,the dataset is usable for logistic regression despite the class imbalance. However, accuracy alone may not be a reliable performance metric, as the model might be biased toward predicting non-diabetic cases. To mitigate this issue, additional metrics such as **ROC/AUC, Precision, Recall, and F1-Score** should be considered to better evaluate the model’s predictive capability.
+
+### Interpretation of Summary, Correlation, and Histogram
+Summary statistics reveal that diabetic individuals generally have higher glucose levels (median: 117), BMI (median: 32.4), and are older (mean: 33.24 years). In contrast, variables like BloodPressure, SkinThickness, and Insulin show weaker discrimination between the two groups.
+Histogram visualizations confirm that diabetics tend to have elevated glucose and BMI values. There is strong separation in glucose distribution, while BMI also highlights the association between obesity and diabetes. Age shows moderate overlap between groups, indicating some variability.
+Correlation analysis supports these findings. Glucose has the strongest correlation with the outcome (0.4929), followed by BMI (0.3119), emphasizing their importance as predictors. Age (0.2384) and Pregnancies (0.2219) show moderate correlations, while Blood Pressure and Skin Thickness have weaker relationships. These results highlight the need to prioritize glucose control and healthy body weight for diabetes risk management.
+
+### Combined Histogram for Key Predictors
+```{r , echo=FALSE, fig.height=2.5}
+# Step 1: Define a function to plot multiple compact histograms side-by-side
+plot_compact_histogram <- function(data) {
+  # Set layout to 1 row and 3 columns, with reduced vertical height
+  par(mfrow = c(1, 3),              # 1 row, 3 columns
+      mai = c(0.3, 0.3, 0.3, 0.1),   # Reduce margins (bottom, left, top, right)
+      cex.axis = 0.8,                # Smaller axis text
+      cex.main = 0.9)                # Smaller main title text
+  
+  # Step 2: Histogram for Glucose
+  hist_values <- hist(data$Glucose, breaks = 20, plot = FALSE)
+  hist(data$Glucose[data$Outcome == 0], breaks = hist_values$breaks, col = rgb(0, 0, 1, 0.5), 
+       main = "Glucose", xlab = "", ylab = "", border = "white")
+  hist(data$Glucose[data$Outcome == 1], breaks = hist_values$breaks, col = rgb(1, 0, 0, 0.5), add = TRUE)
+  
+  # Step 3: Histogram for BMI
+  hist_values <- hist(data$BMI, breaks = 20, plot = FALSE)
+  hist(data$BMI[data$Outcome == 0], breaks = hist_values$breaks, col = rgb(0, 0, 1, 0.5), 
+       main = "BMI", xlab = "", ylab = "", border = "white")
+  hist(data$BMI[data$Outcome == 1], breaks = hist_values$breaks, col = rgb(1, 0, 0, 0.5), add = TRUE)
+  
+  # Step 4:Histogram for Age
+  hist_values <- hist(data$Age, breaks = 20, plot = FALSE)
+  hist(data$Age[data$Outcome == 0], breaks = hist_values$breaks, col = rgb(0, 0, 1, 0.5), 
+       main = "Age", xlab = "", ylab = "", border = "white")
+  hist(data$Age[data$Outcome == 1], breaks = hist_values$breaks, col = rgb(1, 0, 0, 0.5), add = TRUE)
+  
+  # Add legend
+  legend("topright", legend = c("Non-diabetic", "Diabetic"), 
+         fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)), border = "white", bty = "n", cex = 0.8)
+}
+
+# Call the function to generate the plot
+plot_compact_histogram(diabetes_data)
+
+# Step 5:Generate the compact plot
+plot_compact_histogram(diabetes_data)
+
+```
+
+## (b) Assumption Check and Fit Logistic Regression 
+
+```{r , echo=FALSE}
+# --- Step 1: Define Helper Functions --- #
+
+# Function to calculate VIF (for multicollinearity)
+calculate_vif <- function(model) {
+  predictors <- names(coef(model))[-1]  # Exclude the intercept
+  vif_values <- numeric(length(predictors))  # Initialize an empty vector for VIF values
+  
+  # Get the model matrix without the intercept term
+  model_data <- as.data.frame(model.matrix(model)[, -1])  # Convert to data frame for easy manipulation
+  
+  # Loop over each predictor to calculate VIF
+  for (i in seq_along(predictors)) {
+    formula <- as.formula(paste(predictors[i], "~ ."))  # Create a formula to regress the predictor on others
+    vif_model <- lm(formula, data = model_data)  # Fit a linear model with the current predictor as the response
+    r_squared <- summary(vif_model)$r.squared  # Get the R-squared value from the model
+    vif_values[i] <- 1 / (1 - r_squared)  # Calculate VIF using the formula: VIF = 1 / (1 - R²)
+  }
+  
+  # Return the results as a data frame
+  return(data.frame(Variable = predictors, VIF = vif_values))
+}
+
+# Function to check the linearity of logit by calculating correlation between fitted values and residuals
+check_linearity <- function(model, data) {
+  data$residuals <- residuals(model, type = "deviance")  # Get deviance residuals from the model
+  data$fitted <- fitted(model)  # Get fitted values from the model
+  return(cor(data$fitted, data$residuals))  # Return the correlation between fitted values and residuals
+}
+
+# Function to calculate the Durbin-Watson statistic manually
+calculate_dw_stat <- function(residuals) {
+  residual_diff <- diff(residuals)  # Compute the difference between consecutive residuals
+  dw_stat <- sum(residual_diff^2) / sum(residuals^2)  # Apply the Durbin-Watson formula
+  return(dw_stat)  # Return the DW statistic
+}
+
+# --- Step 2: Fit the Model Without Transformation --- #
+
+# Fit the logistic regression model using the original `Age` without any transformations
+model_final <- glm(
+  Outcome ~ Pregnancies + Glucose + BloodPressure + SkinThickness + 
+    Insulin + BMI + Age,  # Include Age as it is
+  family = binomial(link = "logit"),  # Specify a binomial family with a logit link function
+  data = diabetes_data  # Use the diabetes dataset
+)
+
+# --- Step 3: Perform Assumption Checks --- #
+
+# 1. Check for multicollinearity using VIF
+vif_results <- calculate_vif(model_final)  # Call the VIF function and store the results
+
+# 2. Check for logit linearity by calculating correlation between fitted values and residuals
+correlation_logit <- check_linearity(model_final, diabetes_data)  # Get the correlation to assess logit linearity
+
+# 3. Check for residual independence using the Durbin-Watson statistic
+dw_stat <- calculate_dw_stat(residuals(model_final, type = "deviance"))  # Calculate the Durbin-Watson statistic
+
+# --- Step 4: Summarize and Output the Results --- #
+
+# Create a summary table with assumption checks
+assumption_summary <- data.frame(
+  Assumption = c("Multicollinearity (VIF)", "Linearity of Logit (Correlation)", "Independence (Durbin-Watson)"),  # Names of the assumptions
+  Value = c(mean(vif_results$VIF), correlation_logit, dw_stat),  # Calculated values for each assumption
+  Interpretation = c(
+    ifelse(mean(vif_results$VIF) < 5, "No serious multicollinearity", "Potential multicollinearity issue"),  # Interpretation for VIF
+    ifelse(abs(correlation_logit) < 0.15, "Logit linearity acceptable (within tolerance)", "Potential non-linearity in logit"),  # Linearity interpretation
+    ifelse(dw_stat > 1.5 & dw_stat < 2.5, "Residuals are independent", "Potential autocorrelation")  # Interpretation for residual independence
+  )
+)
+
+# Print the summary table to display the assumption check results
+print(assumption_summary)
+
+
+```
+Fit full/initial model using following code :
+```{r , echo=TRUE}
+# Fit an initial logistic regression model
+initial_model <- glm(Outcome ~ ., data = diabetes_data, family = "binomial")
+summary(initial_model)
+```
+### Assumption Check  
+All assumptions have been satisfied: there is no serious multicollinearity (VIF = 1.41), logit linearity is acceptable (correlation = 0.13), and residuals are independent (Durbin-Watson = 1.95).
+
+### Model Interpretation  
+Higher **glucose levels**, **BMI**, and **number of pregnancies** are the strongest predictors of diabetes. **Blood pressure**, **skin thickness**, and **insulin levels** do not show significant effects. **Age** has some impact but is less important than glucose or BMI. The model's residual deviance (722.05) indicates improved fit compared to the null model.
+
+## (c) Model Refinement
+
+### Model Selection Process
+
+### Step 1: Initial Deviance Reduction Analysis  
+The process began by assessing each predictor's contribution through deviance reduction using a Chi-square test. Out of the 7 initial predictors (Pregnancies, Glucose, BMI, BloodPressure, SkinThickness, Insulin, and Age), only three predictors—Pregnancies, Glucose, and BMI—were found to be significant and included in the base model.
+
+Next, we tested two-way and three-way interaction terms among these selected predictors. The deviance reductions and p-values are summarized below:
+
+Term                        | Degree | Deviance Reduction | P-Value  
+----------------------------|--------|--------------------|---------  
+Pregnancies * Glucose * BMI | 3      | 2.9652             | 0.5637  
+Pregnancies * Glucose       | 2      | 1.7368             | 0.1875  
+Glucose * BMI               | 2      | 0.2124             | 0.6449  
+Pregnancies * BMI           | 2      | 0.0078             | 0.9297  
+Pregnancies                 | 1      | 0.0000             | NA  
+Glucose                     | 1      | 0.0000             | NA  
+BMI                         | 1      | 0.0000             | NA  
+
+Although some interaction terms showed minor deviance reductions, none were statistically significant (p-values > 0.05).  
+
+### Step 2: Model Generation  
+Using a base model with the main effects (Pregnancies, Glucose, and BMI), generated and evaluated all candidate models automatically 
+with two-way and three-way interactions.
+
+### Step 3: Cross-Validation and Performance Evaluation  
+Each model was evaluated using 10-fold cross-validation, with the following performance metrics:  
+- **Accuracy**: The proportion of correctly classified outcomes.  
+- **F1 Score**: The harmonic mean of precision and recall.  
+- **AIC/BIC**: Metrics that assess model fit, penalizing for complexity.  
+- **Deviance**: A measure of goodness-of-fit, where lower values indicate better fit.
+
+Despite reasonable performance metrics, including an accuracy of 76.17%, interaction terms were not statistically significant. Therefore, the initial model containing only the main effects was retained.
+
+### Step 4: Final Model Selection  
+The final model includes only the main effects of Pregnancies, Glucose, and BMI. It demonstrated:  
+- An accuracy of 76.17% and reasonable F1-score performance.  
+- Significant main effects for each predictor.  
+- No significant improvement from adding interaction terms, supporting the decision to retain the simpler model.
+
+
+```{r , echo=FALSE}
+
+# --- Step 1: Generate interaction terms for selected variables --- #
+generate_interaction_terms <- function(variables, degree) {
+  if (degree == 1) return(variables)  # Return main effects
+  combn(variables, degree, function(term_set) paste(term_set, collapse = " * "), simplify = TRUE)
+}
+
+# --- Step 2: Fit and compare models --- #
+fit_and_compare_term <- function(base_model, term, data) {
+  base_formula_str <- paste(deparse(formula(base_model)), collapse = "")
+
+  # Add interaction term to formula
+  full_formula_str <- paste(base_formula_str, "+", term)
+  full_formula <- as.formula(full_formula_str)
+
+  # Fit model with error handling
+  new_model <- tryCatch(
+    glm(full_formula, family = binomial(link = "logit"), data = data),
+    error = function(e) {
+      print(paste("Error fitting model for:", term))
+      return(NULL)
+    }
+  )
+
+  if (is.null(new_model)) return(NULL)
+
+  # Perform Chi-square ANOVA test
+  anova_result <- anova(base_model, new_model, test = "Chisq")
+
+  # Return model results
+  return(list(
+    model = new_model,
+    deviance_reduction = anova_result$"Deviance"[2],
+    p_value = anova_result$"Pr(>Chi)"[2]
+  ))
+}
+
+# --- Step 3: Perform Deviance Test --- #
+
+# Predictor variables restricted to Pregnancies, Glucose, BMI
+predictors <- c("Pregnancies", "Glucose", "BMI")
+
+# Fit base model with only the predictors
+base_model <- glm(Outcome ~ Pregnancies + Glucose + BMI, 
+                  family = binomial(link = "logit"), data = diabetes_data)
+
+# Initialize results list
+all_results <- list()
+
+# --- Test 1-way, 2-way, and 3-way interactions --- #
+for (degree in 1:3) {
+  interaction_terms <- generate_interaction_terms(predictors, degree)
+  for (interaction in interaction_terms) {
+    result <- fit_and_compare_term(base_model, interaction, diabetes_data)
+    if (!is.null(result)) {
+      all_results[[interaction]] <- list(
+        term = interaction,
+        deviance_reduction = result$deviance_reduction,
+        p_value = result$p_value,
+        degree = degree
+      )
+    }
+  }
+}
+
+# --- Compile Results --- #
+
+# Convert results to a data frame
+final_results <- data.frame(
+  Term = names(all_results),
+  Degree = sapply(all_results, function(x) x$degree),
+  DevianceReduction = sapply(all_results, function(x) x$deviance_reduction),
+  P_Value = sapply(all_results, function(x) x$p_value)
+)
+
+# Sort by deviance reduction in descending order
+final_results <- final_results[order(-final_results$DevianceReduction), ]
+
+# --- Display All Results --- #
+# print(final_results)
+
+
+#================ DO K-FOLD CROSS VALIDATION
+
+# --- Step 1: Define Helper Functions --- #
+
+# Function to generate interaction terms for a given degree
+generate_interaction_terms <- function(variables, degree) {
+  if (degree == 1) return(variables)  # Return main effects for degree 1
+  combn(variables, degree, function(term_set) {
+    paste(term_set, collapse = " * ")  # Create interaction term string
+  }, simplify = TRUE)
+}
+
+# Step 2: Function to build a complete formula from base and interaction terms
+generate_formula <- function(base_formula_str, interaction_terms) {
+  if (is.null(interaction_terms) || interaction_terms == "") {
+    return(as.formula(base_formula_str))  # Return base formula if no interactions
+  }
+  return(as.formula(paste(base_formula_str, "+", interaction_terms)))
+}
+
+# Step 3: Function to perform k-fold cross-validation
+cross_validate_model <- function(formula, data, k = 10) {
+  set.seed(123)  # Set random seed for reproducibility
+  folds <- sample(1:k, nrow(data), replace = TRUE)  # Generate fold assignments
+
+  # Initialize vectors to store results
+  accuracy_scores <- numeric(k)
+  f1_scores <- numeric(k)
+  aic_values <- numeric(k)
+  deviance_values <- numeric(k)
+
+  for (i in 1:k) {
+    # Split the data into training and test sets
+    train_data <- data[folds != i, ]
+    test_data <- data[folds == i, ]
+
+    # Fit the model on training data
+    model <- glm(formula, family = binomial(link = "logit"), data = train_data)
+
+    # Predict on test data
+    predictions <- ifelse(predict(model, newdata = test_data, type = "response") > 0.5, 1, 0)
+
+    # Calculate accuracy
+    true_labels <- test_data$Outcome
+    accuracy_scores[i] <- mean(predictions == true_labels)
+
+    # Calculate F1 score
+    tp <- sum(predictions == 1 & true_labels == 1)
+    fp <- sum(predictions == 1 & true_labels == 0)
+    fn <- sum(predictions == 0 & true_labels == 1)
+    precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+    recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+    f1_scores[i] <- ifelse(precision + recall == 0, 0, 2 * (precision * recall) / (precision + recall))
+
+    # Store AIC and deviance
+    aic_values[i] <- AIC(model)
+    deviance_values[i] <- deviance(model)
+  }
+
+  # Step 4:Return average metrics
+  return(list(
+    Accuracy = mean(accuracy_scores),
+    F1_Score = mean(f1_scores),
+    AIC = mean(aic_values),
+    Deviance = mean(deviance_values)
+  ))
+}
+
+# --- Step 5: Initialize Variables --- #
+
+# Predictor variables
+predictors <- c("Pregnancies", "Glucose", "BMI", "BloodPressure", "SkinThickness", "Insulin", "Age")
+
+# Base formula string
+base_formula_str <- "Outcome ~ Pregnancies + Glucose + BMI"
+
+# Significant terms identified earlier
+significant_terms <- c(
+  "Pregnancies * Glucose * BMI",
+  "Pregnancies * Glucose",
+  "Glucose * BMI",
+  "Pregnancies * BMI"
+)
+
+# Step 6: Generate all model combinations (interaction subsets)
+all_combinations <- unlist(lapply(1:length(significant_terms), function(i) {
+  combn(significant_terms, i, paste, collapse = " + ")
+}), use.names = FALSE)
+
+# Step 7: Generate formula list from combinations
+model_combinations <- lapply(all_combinations, function(terms) {
+  generate_formula(base_formula_str, terms)
+})
+
+# Add base model without interactions
+model_combinations <- c(as.formula(base_formula_str), model_combinations)
+
+# Step 8: Generate model names
+model_names <- c("Base Model", paste("Base +", all_combinations))
+
+# --- Step 9: Perform Cross-Validation --- #
+
+# Initialize results storage
+cv_results <- data.frame(
+  Model = character(),
+  Accuracy = numeric(),
+  F1_Score = numeric(),
+  AIC = numeric(),
+  Deviance = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Cross-validate each model
+for (i in seq_along(model_combinations)) {
+  formula <- model_combinations[[i]]
+  model_name <- model_names[i]
+
+  # Perform cross-validation with error handling
+  metrics <- tryCatch({
+    cross_validate_model(formula, diabetes_data, k = 10)
+  }, error = function(e) {
+    cat("Error in Model", i, ":", conditionMessage(e), "\n")
+    return(NULL)
+  })
+
+  if (is.null(metrics)) next  # Skip failed models
+
+  # Store results
+  cv_results <- rbind(cv_results, data.frame(
+    Model = model_name,
+    Accuracy = metrics$Accuracy,
+    F1_Score = metrics$F1_Score,
+    AIC = metrics$AIC,
+    Deviance = metrics$Deviance
+  ))
+}
+
+# --- Step 10: Display Results --- #
+
+# Sort by Accuracy and display the top 6 models
+cv_results <- cv_results[order(-cv_results$Accuracy), ]
+
+# --- Step 11:Function to extract summary and significant predictors from models --- #
+extract_summary_and_significant_predictors <- function(model_list) {
+  results <- data.frame(
+    Model = character(),
+    Significant_Predictors = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (model_name in names(model_list)) {
+    cat("\n== Evaluating Model:", model_name, "==\n")
+    
+    # Get the model
+    model <- model_list[[model_name]]
+    
+    # Display summary
+    summary_output <- summary(model)
+    #print(summary_output)
+    
+    # Extract significant predictors (p < 0.05)
+    significant_terms <- summary_output$coefficients[summary_output$coefficients[, 4] < 0.05, , drop = FALSE]
+    
+    if (nrow(significant_terms) > 0) {
+      significant_predictors <- rownames(significant_terms)
+      cat("\nSignificant Predictors (p < 0.05):", paste(significant_predictors, collapse = ", "), "\n")
+    } else {
+      significant_predictors <- "None"
+      cat("\nNo significant predictors found (p < 0.05).\n")
+    }
+    
+    # Store results
+    results <- rbind(results, data.frame(
+      Model = model_name,
+      Significant_Predictors = paste(significant_predictors, collapse = ", ")
+    ))
+  }
+  
+  return(results)
+}
+
+#print(cv_results )
+```
+
+
+
+```{r , echo=TRUE}
+
+# Step 12: Use final model obtained from cross validation
+final_model <- glm(Outcome ~ Pregnancies + Glucose + BMI , 
+                   data = diabetes_data, family = "binomial")
+
+# Print the summary
+summary(final_model)
+
+```
+### Interpretation of best model
+
+Using \(\alpha = 5\%\), the model aims to predict the likelihood of a positive outcome (e.g., diabetes) based on the combination of Pregnancies, Glucose, and BMI. From the results, we can draw the following conclusions:
+
+- The model suggests that individuals with higher values of Glucose, BMI, or Pregnancies are more likely to have a positive outcome.
+
+- Glucose levels appear to be the most influential factor. This indicates that higher blood glucose is strongly associated with a higher risk of a positive outcome.
+
+- The model accounts for 27\% of the variability in the data, meaning that while these three predictors help explain part of the risk, there are still other factors that could affect the outcome that are not included in this model.
+
+- All predictors have statistically significant effects, meaning their contributions are unlikely to be due to random chance.
+
+Overall, the model highlights the importance of monitoring glucose levels and BMI when assessing the likelihood of a positive outcome in this dataset.
+
+## (d) Estimated Probabilities (of having diabetes) using Histogram
+
+```{r ,echo=FALSE, fig.height=3.5}
+
+# Step 1: Obtain the estimated probabilities using fitted()
+predicted_probabilities <- fitted(final_model)
+
+# Add the probabilities and outcome to the data for plotting
+diabetes_data$EstimatedProbabilities <- predicted_probabilities
+
+# Step 2: Plot histogram of estimated probabilities
+
+ggplot(diabetes_data, aes(x = EstimatedProbabilities, fill = as.factor(Outcome))) +
+  geom_histogram(binwidth = 0.05, position = "dodge", alpha = 0.7) +
+  labs(title = "Histogram of Estimated Probabilities for Diabetes",
+       x = "Estimated Probability of Having Diabetes",
+       y = "Frequency",
+       fill = "Outcome") +
+  scale_fill_manual(values = c("blue", "red")) +  # Blue for Outcome = 0, Red for Outcome = 1
+  theme_minimal(base_size = 7)
+
+```
+
+### Interpretation of the Estimated Probability Histogram:
+
+The histogram shows how the predicted probabilities from the logistic regression model are distributed across the two outcome groups.
+
+- Individuals without diabetes (Outcome = 0, blue) mostly have low predicted probabilities. This indicates that the model classifies them as having a low risk for diabetes.
+- Individuals with diabetes (Outcome = 1, red) tend to have higher predicted probabilities, suggesting that the model identifies them as higher risk.
+- Ideally, a well-performing model should display clear separation between these groups, with non-diabetic cases near zero and diabetic cases near one.
+- If there is substantial overlap between the two distributions, the model may have difficulty distinguishing between the two groups, leading to potential misclassifications.
+- Reduced overlap implies greater model confidence, while significant overlap suggests that further refinement or additional features may improve the model's classification ability.
+
+## (e) ROC Curve 
+
+```{r}
+
+# Step 1: Define thresholds from 0 to 1 in steps of 0.01
+thresholds <- seq(0, 1, by = 0.01)
+
+# Step 2: Create empty vectors to store TPR and FPR for each threshold
+true_positive_rate <- numeric(length(thresholds))
+false_positive_rate <- numeric(length(thresholds))
+
+# Step 3: Loop through each threshold to calculate TPR and FPR
+for (i in seq_along(thresholds)) {
+  
+  # Classify as 1 (diabetic) if predicted probability > threshold, otherwise 0 (non-diabetic)
+  predicted_class <- ifelse(predicted_probabilities > thresholds[i], 1, 0)
+  
+  # Calculate True Positives, False Positives, True Negatives, and False Negatives
+  true_positives <- sum(predicted_class == 1 & diabetes_data$Outcome == 1)
+  false_positives <- sum(predicted_class == 1 & diabetes_data$Outcome == 0)
+  true_negatives <- sum(predicted_class == 0 & diabetes_data$Outcome == 0)
+  false_negatives <- sum(predicted_class == 0 & diabetes_data$Outcome == 1)
+  
+  # Calculate True Positive Rate (TPR) and False Positive Rate (FPR)
+  true_positive_rate[i] <- true_positives / (true_positives + false_negatives)  # TPR
+  false_positive_rate[i] <- false_positives / (false_positives + true_negatives)  # FPR
+}
+
+# Step 4: Plot the ROC curve
+plot(false_positive_rate, true_positive_rate, type = "l", col = "blue", lwd = 2, 
+     xlab = "False Positive Rate", ylab = "True Positive Rate", 
+     main = "Receiver Operating Characteristic (ROC) Curve")
+abline(0, 1, lty = 2, col = "red")  # Add a reference diagonal line (random classifier)
+
+
+# Step 5: Function to calculate AUC using the trapezoidal rule
+calculate_auc <- function(fpr, tpr) {
+  # Ensure the points are sorted by FPR
+  sorted_indices <- order(fpr)
+  fpr <- fpr[sorted_indices]
+  tpr <- tpr[sorted_indices]
+
+  # Calculate the AUC using the trapezoidal rule
+  auc <- sum((fpr[-1] - fpr[-length(fpr)]) * (tpr[-1] + tpr[-length(tpr)]) / 2)
+  return(auc)
+}
+
+# Step 6: Call the function to get AUC
+auc_value <- calculate_auc(false_positive_rate, true_positive_rate)
+
+# Print the result
+cat("The calculated AUC is:", round(auc_value, 4), "\n")
+
+
+```
+
+### Interpretation of the ROC Curve and Analysis:
+- This ROC curve plots the **True Positive Rate (Sensitivity)** against the **False Positive Rate** at various threshold levels.
+- Ideally, a well-performing model will have a curve that moves closer to the **top-left corner**, indicating high TPR with low FPR.
+- **The diagonal red line** represents a random classifier (i.e., a model that predicts no better than chance). A good model should have its curve well above this line.
+- The **shape of the ROC curve** helps assess the trade-off between sensitivity and specificity for different threshold values.
+- The calculated AUC value is **0.8357**, indicating that the model has a good balance between sensitivity and specificity.
+
+
+## (f) Optimal Threshold Function
+
+```{r, echo=TRUE}
+
+# --- Step 1: Define the Function ---
+find_optimal_threshold <- function(probabilities, actual_outcomes) {
+  # Define thresholds between 0 and 1, stepping by 0.01
+  thresholds <- seq(0, 1, by = 0.01)
+  
+  # Initialize a vector to store the combined metric values
+  optimal_metric <- numeric(length(thresholds))
+
+  # --- Step 2: Loop through each threshold ---
+  for (i in seq_along(thresholds)) {
+    threshold <- thresholds[i]
+    
+    # Classify observations based on the current threshold
+    predicted_class <- ifelse(probabilities > threshold, 1, 0)
+
+    # Confusion matrix components
+    tp <- sum(predicted_class == 1 & actual_outcomes == 1)  # True positives
+    fp <- sum(predicted_class == 1 & actual_outcomes == 0)  # False positives
+    tn <- sum(predicted_class == 0 & actual_outcomes == 0)  # True negatives
+    fn <- sum(predicted_class == 0 & actual_outcomes == 1)  # False negatives
+
+    # Avoid division by zero errors and calculate TPR and FPR
+    tpr <- ifelse((tp + fn) > 0, tp / (tp + fn), 0)  # True Positive Rate
+    fpr <- ifelse((fp + tn) > 0, fp / (fp + tn), 0)  # False Positive Rate
+
+    # Calculate the optimization metric (TPR + (1 - FPR))
+    optimal_metric[i] <- tpr + (1 - fpr)
+  }
+
+  # --- Step 3: Find the Optimal Threshold ---
+  best_index <- which.max(optimal_metric)  # Index of maximum metric value
+  best_threshold <- thresholds[best_index]  # Optimal threshold
+
+  # Display the optimal threshold and its metric value
+  cat("Optimal Threshold based on (TPR + (1 - FPR)): ", best_threshold, 
+      " with a metric value of: ", round(optimal_metric[best_index], 6), "\n")
+
+  return(best_threshold)  # Return the optimal threshold
+}
+
+# --- Step 4: Use the Function ---
+predicted_probabilities <- fitted(final_model)  # Get predicted probabilities
+optimal_threshold <- find_optimal_threshold(predicted_probabilities, diabetes_data$Outcome)
+
+# --- Step 5: Calculate Accuracy using optimal threshold ---
+final_predictions <- ifelse(predicted_probabilities > optimal_threshold, 1, 0)
+accuracy <- mean(final_predictions == diabetes_data$Outcome)
+cat("Accuracy at Optimal Threshold: ", round(accuracy * 100, 2), "%\n")
+
+```
+
+### Explanation of the Code for Part (f):
+* Step 1: Define the Function  
+The function `find_optimal_threshold` calculates the optimal threshold by maximizing the metric \( \text{TPR} + (1 - \text{FPR}) \). It iterates through thresholds from 0 to 1, classifying predictions based on each threshold.
+* Step 2: Loop through Each Threshold  
+For each threshold:  
+* Classify predictions as 1 (positive) or 0 (negative).  
+* Compute confusion matrix components: true positives (TP), false positives (FP), true negatives (TN), and false negatives (FN).  
+* Calculate TPR and FPR:
+Step 3: Find the Optimal Threshold  
+The threshold with the highest metric value is selected as optimal. The function returns and prints this threshold.
+* Step 4: Use the Function  
+The model's predicted probabilities are passed to the function, and the optimal threshold is found.
+
+### Part D: Histogram Interpretation 
+
+The histogram shows that individuals without diabetes (blue) have low predicted probabilities, while diabetic cases (red) generally have higher predicted values. However, overlap exists between the probabilities in the range of 0.2 to 0.7, which may lead to misclassification. This overlap suggests that a lower threshold may improve sensitivity.
+
+### Optimal Threshold
+
+The optimal threshold based on the metric TPR + (1 - FPR) is 0.34, with a metric value of 1.507612 . A lower threshold helps identify more diabetic cases but increases false positives. This trade-off is appropriate due to the overlap seen in the histogram.
+
+### ROC Curve and AUC
+
+The ROC curve measures how well the model balances sensitivity and the false positive rate across different thresholds. The calculated Area Under the Curve (AUC) is 0.8357, which indicates good model performance. AUC values near 1 imply that the model can effectively separate diabetic and non-diabetic cases.
+
+### Accuracy at Optimal Threshold
+
+The model achieves 76.17\% accuracy at the optimal threshold of 0.34. While this indicates a generally good fit, accuracy should not be the sole evaluation metric due to the class imbalance. The ROC curve and AUC provide a more reliable assessment of model performance.
+
+
+

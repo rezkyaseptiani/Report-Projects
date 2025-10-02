@@ -1,0 +1,1295 @@
+---
+title: "23070164"
+author: ""
+output:
+  pdf_document:
+    toc: no
+    number_sections: true
+    keep_tex: true
+    latex_engine: xelatex
+    pandoc_args: ["--variable=geometry:a4paper,left=0.5in,right=0.5in,top=0.5in,bottom=0.5in"]
+
+classoption: 
+  - 10pt
+  - a4paper
+header-includes:
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{graphicx}
+- \DeclareGraphicsExtensions{.png}
+- \setkeys{Gin}{width=\linewidth, keepaspectratio}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  dev = "png",
+  fig.ext = "png",
+  fig.path = "figures/",
+  fig.width = 6,
+  fig.height = 4,
+  out.width = "100%",
+  fig.crop = NULL)
+suppressMessages({
+  
+  library(randomForest)   #in Question 2(a)
+  library(mclust)           #Adjusted Rand Index in 1(c)
+  library(xgboost)            #Question 2(c)
+  library(ggplot2)
+})
+set.seed(123)
+```
+
+# Question 1
+
+## (a) Looking for appropriate number of clusters
+
+*Pseudocode*
+
+Goal: Try to figure out how many clusters that make sense when grouping 
+earthquakes by their magnitude and depth.
+
+Steps:
+1. First, quickly check if there is anything odd in the data, like missing 
+values or zero entries in the magnitude or depth columns.
+2. Pull out just the columns we need: magnitude and depth. That is what I 
+will use for clustering.
+3. Since depth is in kilometres and much larger than magnitude, it makes 
+sense to scale both variables before we start clustering!
+4. Run K-means clustering for several values of k (say from 1 to 10), and 
+for each one, record how spread out the clusters are.
+5. Plot those results to see where the improvement slows down. That’s usually 
+where the 'elbow' is , the point where adding more clusters is no longer worth.
+6. Wrap all that into a function to keep things tidy.
+7. Run the function on the scaled data and look at the elbow plot, do K means 
+clustering using elbow method for the best number of K and visualize it. 
+8. Finally, explain what the plot tells us and why needed to scale the 
+data beforehand!
+
+
+```{r q1a, echo=TRUE}
+
+set.seed(123)
+# Step 1: Check for missing or invalid values both for NA or zeros
+# in key variables)
+
+# Count missing values in mag and depth
+missing_cols <- colSums(is.na(quakes[, c("mag", "depth")]))
+# Check how many zeros (not expected in geophysical data)
+zero_mag <- sum(quakes$mag == 0)
+zero_depth <- sum(quakes$depth == 0)
+
+# Print a summary of the checks above
+cat("Data Quality Check:\n")
+cat("Missing in mag:", missing_cols["mag"], "\n")
+cat("Missing in depth:", missing_cols["depth"], "\n")
+cat("Zeros in mag:", zero_mag, "\n")
+cat("Zeros in depth:", zero_depth, "\n")
+
+# Step 2: Select and scale the variables we're clustering on
+
+# Just use magnitude and depth, others not relevant for this question
+data_cluster <- quakes[, c("mag", "depth")]
+
+# Scale both columns to make sure they're on equal footing
+# (depth values are much larger than magnitude, so this is necessary)
+data_scaled <- scale(data_cluster)
+
+# Step 3-6: Define a reusable function that runs the elbow method
+# and adds annotations to the plot showing how much WSS drops between k
+run_elbow_kmeans <- function(scaled_data, k_max = 10, seed = 1) {
+  set.seed(seed)  # Set random seed for reproducibility
+
+  # For each k, run k-means and store total within-cluster variation
+  wss <- sapply(1:k_max, function(k) {
+    kmeans(scaled_data, centers = k, nstart = 10, iter.max = 15)$tot.withinss
+  })
+
+  # Compute drop in WSS between each k (for plot annotations)
+  delta <- diff(wss)
+
+  # Plot the elbow graph to help choose the best number of clusters
+  plot(1:k_max, wss,
+       type = "b",                # b means both line and points
+       pch = 19,                  # solid circle points
+       frame = FALSE,             # no box around the plot
+       xlab = "How many groups we try (k)",     # less technical x-axis label
+       ylab = "How tight the clusters are (WSS)",    # intuitive y-axis label
+       main = "Where does the elbow happen?")
+    # Label WSS value on each point (makes it easier to read actual values)
+  
+  text(1:k_max, wss,
+       labels = round(wss, 0),  # round WSS to nearest whole number
+       pos = 3,             # position the label above the point
+       cex = 0.7,         # make text a bit smaller
+       col = "blue")    # use a different color to distinguish
+
+    # Add annotation text showing how much WSS drops between k and k+1
+  for (i in 1:(k_max - 1)) {
+      # finding the x-position between point i and i+1 (horizontal midpoint)
+    mid_x <- (i + i + 1) / 2
+      # find the y-position between the two WSS values (vertical midpoint)
+    mid_y <- (wss[i] + wss[i + 1]) / 2
+      # Create label  to show drop in WSS, rounded to whole number
+    delta_label <- ifelse(is.na(delta[i]), "", paste0( round(delta[i], 0)))
+      #locate the label on the plot between the two points
+    text(mid_x, mid_y,
+         labels = delta_label,
+         cex = 0.8,    # shrink the text size a bit
+         col = "darkgray")   #choosing subtle color so it doesn't 
+                              #overpower the plot
+  }
+}
+
+# Step 7: Actually run the function on the scaled data
+run_elbow_kmeans(data_scaled)
+
+k_best <- 3  # from elbow
+kmeans_final <- kmeans(data_scaled, centers = k_best, nstart = 10)
+
+#next, cluster labels back to original data for plotting
+quakes$kmeans_cluster <- as.factor(kmeans_final$cluster)
+
+#plotting longitude vs latitude, colored by cluster
+ggplot(quakes, aes(x = long, y = lat, color = kmeans_cluster)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(title = "K-means Clustering (k = 3)",
+       x = "Longitude", y = "Latitude", color = "Cluster") +
+  theme_minimal()
+
+```
+*Interpretation*
+
+Magnitude and depth were clean, with no missing or zero values, confirming 
+the data was ready for clustering. Both variables were scaled to prevent depth 
+(in kilometres) from dominating distance calculations, as required 
+for Euclidean-based methods like K-means.
+
+The elbow plot shows a major reduction in within-cluster variation 
+from 918 (k = 1) to 406 (k = 3). Beyond this, the improvement is minimal, 
+indicating that three clusters strike a good balance between simplicity 
+and structure, avoiding overfitting.
+
+The K-means result (k = 3) reveals distinct spatial patterns when plotted by 
+location: each cluster forms coherent geographical regions, suggesting that 
+magnitude, and depth combinations reflect different tectonic zones. 
+The clustering captures this structure effectively.
+
+## (b) Hierarchical Clustering
+
+*Pseudocode*
+
+Goal: Apply hierarchical clustering to the same variables as before, and split
+the data into three groups.
+
+Steps:
+1. Use the scaled magnitude and depth variables (same as in part a).
+2. Compute the distance matrix using Euclidean distance.
+3. Use hierarchical clustering with the Ward method (as in Week 8).
+4. Cut the tree to get exactly 3 clusters, based on elbow result from part a.
+5. Add the cluster labels back into the original data.
+6. Plot the data using longitude and latitude, colouring points by cluster.
+
+
+```{r q1b, echo=TRUE}
+
+set.seed(123)
+# Step 1: Use the same scaled magnitude and depth data from part (a)
+# (data_scaled is already available)
+#so, we can use it further steps !
+# Step 2: Compute the distance matrix using Euclidean distance
+distance_matrix <- dist(data_scaled)
+
+# Step 3: Apply hierarchical clustering using the Ward method
+#basically, thi method tries to minimize the total within cluster variance
+hc_model <- hclust(distance_matrix, method = "ward.D2")
+
+# Step 4: Cut the tree into 3 clusters (based on elbow method from part a)
+hc_clusters <- cutree(hc_model, k = 3)
+
+# Step 5:need to add cluster labels back into the original quakes dataset
+quakes$hc_cluster <- as.factor(hc_clusters)
+# Step 6: Plot spatial distribution (longitude on x-axis, latitude on y-axis)
+ggplot(quakes, aes(x = long, y = lat, color = hc_cluster)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(title = "Hierarchical Clustering (k = 3)",
+       x = "Longitude", y = "Latitude", color = "Cluster") + 
+  theme_minimal()
+```
+
+*Interpretation*
+
+Hierarchical clustering using Ward’s method on scaled magnitude and depth 
+produced three clusters, consistent with the elbow result. The spatial plot 
+shows clear geographic separation, suggesting possible tectonic structure.
+
+## (c) Comparing K-means and hierarchical clusterings
+
+*Pseudocode*
+
+Goal: Check how similar the results are from K-means and hierarchical clustering.
+
+Steps:
+1. Run K-means with k = 3 to generate cluster labels for comparison.
+2. Create a table that compares the cluster assignments from both methods.
+3. Use the Adjusted Rand Index to measure overall similarity between the two.
+4. Calculate purity to check how dominant each label is within each group.
+5. Run a chi-squared test to test for statistical association.
+6. Print all results in one place for easier comparison.
+
+```{r q1c, echo=TRUE}
+set.seed(123)
+# Step 1: Run final K-means using k = 3 (chosen based on elbow method)
+kmeans_final <- kmeans(data_scaled, centers = 3, nstart = 10)
+quakes$kmeans_cluster <- kmeans_final$cluster
+
+#then, dont forget to make a data frame ! combining both 
+cluster_df <- data.frame(
+  hierarchical = quakes$hc_cluster,
+  kmeans = quakes$kmeans_cluster
+)
+# Step 2: Create a contingency table of the two clustering results
+cluster_table <- table(quakes$hc_cluster, quakes$kmeans_cluster)
+
+# Step 3: Calculate Adjusted Rand Index (measures similarity 
+#between clustering results)
+ari_result <- mclust::adjustedRandIndex(quakes$hc_cluster, quakes$kmeans_cluster)
+
+# Step 4: Define purity function and calculate purity score
+
+# This function calculates the purity based on a contingency table
+get_purity <- function(tab) {
+  # For each column (example: each predicted cluster), find the largest count,
+  # which represents the most common true class within that cluster
+  dominant_counts <- apply(tab, 2, max)
+  #Sum all dominant counts across clusters
+  total_dominant <- sum(dominant_counts)
+  # Divide by the total number of data points in the table
+  total_points <- sum(tab)
+  # Return the final purity score as a proportion
+  return(total_dominant / total_points)
+}
+
+# Apply the function to our cluster comparison table
+purity_value <- get_purity(cluster_table)
+
+
+# Step 5: Perform chi-squared test to see if the clusterings are statistically 
+#associated
+chi_test <- chisq.test(cluster_table)
+
+# Step 6: Display all results in one block
+cat("Clustering Comparison Summary:\n")
+cat("Adjusted Rand Index:", round(ari_result, 3), "\n")
+cat("Purity Score:", round(purity_value, 3), "\n")
+cat("Chi-squared Test p-value:", signif(chi_test$p.value, 4), "\n")
+
+
+
+```
+## (d) Interpretation
+
+The clustering results from K-means and hierarchical clustering (Ward method) 
+show a strong level of agreement. The Adjusted Rand Index (ARI) is 0.713, 
+indicating substantial similarity in how the two methods grouped the data. 
+The purity score of 0.897 further confirms that most observations in each 
+predicted cluster align with a dominant group.
+
+The chi-squared test returns a p-value close to zero, suggesting the two sets 
+of cluster labels are statistically dependent rather than random.
+
+Overall, these results imply that both methods identify similar patterns in the 
+data. Despite using different algorithms, they consistently detect the same 
+underlying structure based on magnitude and depth.
+
+# Question 2
+
+## (a) Perform Random Forests Classification
+
+*Pseudocode*
+
+Goal: Use Random Forest to classify earthquakes into three magnitude categories
+using depth, latitude, and longitude.
+
+Steps:
+1. Create a new variable mag_class with three levels:
+   - "Small" if magnitude <= 4
+   - "Moderate" if 4 < magnitude < 5
+   - "Large" if magnitude >= 5
+2. Convert mag_class into a factor with proper level order.
+3. Select only the allowed predictors: depth, latitude, and longitude.
+4. Assign each observation randomly into one of five folds for cross-validation.
+5. Loop through the folds:
+   - Train a Random Forest model on 4/5 of the data.
+   - Predict on the remaining 1/5.
+   - Compute fold-level accuracy and macro-averaged F1-score.
+6. After cross-validation, calculate and display average accuracy and F1-score.
+7. Display the confusion matrix from the final fold to visualise 
+  misclassifications.
+8. Retrain the model on the full dataset and compute variable importance using 
+  permutation-based accuracy drop (type = 1).
+
+
+```{r q2a , echo=TRUE}
+
+# Make sure results are reproducible
+set.seed(123)
+
+# Step 1: Create magnitude categories: Small (<=4), Moderate (>4 and <5), Large (>=5)
+quakes$mag_class <- with(quakes, ifelse(mag <= 4, "Small",
+                                 ifelse(mag < 5, "Moderate", "Large")))
+quakes$mag_class <- factor(quakes$mag_class, levels = c("Small", "Moderate", "Large"))
+# Step 2:only the approved features: depth, lat, long
+rf_inputs <- quakes[, c("depth", "lat", "long")]
+rf_target <- quakes$mag_class
+n_obs <- nrow(quakes)
+# Step 3: Create a 5-fold split for external cross-validation
+fold_assign <- sample(rep(1:5, length.out = n_obs))
+# Step 4: Set up storage for metrics across folds
+acc_fold <- numeric(5)
+f1_fold <- numeric(5)
+oob_fold <- numeric(5)
+
+#also save all predictions so it can be used in Q2b
+all_preds <- rep(NA, n_obs)
+all_actuals <- rf_target  # already in order
+
+# Step 5: Define a macro-averaged F1-score function (good for imbalance)
+macro_f1 <- function(pred, truth) {
+  mat <- table(truth, pred) #this one confusion matrix
+  f1s <- numeric(nrow(mat)) # Store F1 per class
+    for (i in 1:nrow(mat)) {
+      tp <- mat[i, i]  # True positives for class i
+      fp <- sum(mat[, i]) - tp # False positives
+      fn <- sum(mat[i, ]) - tp # False negatives
+      prec <- ifelse(tp + fp == 0, 0, tp / (tp + fp)) # Precision
+      rec <- ifelse(tp + fn == 0, 0, tp / (tp + fn)) # Recall
+      f1s[i] <- ifelse(prec + rec == 0, 0, 2 * prec * rec / (prec + rec))# F1
+    }
+  mean(f1s)# Average F1 across all classes
+}
+
+# Step 6: Cross-validation loop , train/test split for each fold
+  # technically, repeats 5 times so each point gets a turn as the test set.
+for (i in 1:5) {
+  test_ids <- which(fold_assign == i) # index for this fold's test set
+  train_ids <- setdiff(1:n_obs, test_ids) # rest is for training
+
+  # starting to train RF on 4/5 of the data
+  rf_fit <- randomForest(x = rf_inputs[train_ids, ],
+                         y = rf_target[train_ids],
+                         ntree = 100,
+                         importance = TRUE)
+
+  #lets do prediction on the holdout fold
+  pred_test <- predict(rf_fit, newdata = rf_inputs[test_ids, ])
+  true_test <- rf_target[test_ids]
+
+  #in this step, record the metrics
+  acc_fold[i] <- mean(pred_test == true_test)
+  f1_fold[i] <- macro_f1(pred_test, true_test)
+  oob_fold[i] <- tail(rf_fit$err.rate[, "OOB"], 1)
+
+  #do preparation to  predictions for Q2(b)
+  all_preds[test_ids] <- pred_test
+}
+
+# Step 7: guess what ? lets print  average performance
+cat("\n5-Fold Cross-Validation Results:\n")
+cat("Mean Accuracy:", round(mean(acc_fold), 3), "\n")
+cat("Mean Macro F1:", round(mean(f1_fold), 3), "\n")
+cat("Mean OOB Error (internal):", round(mean(oob_fold), 3), "\n")
+
+# Step 8: do fiting final model on full data for feature importance
+rf_full <- randomForest(x = rf_inputs,
+                        y = rf_target,
+                        ntree = 100,
+                        importance = TRUE)
+
+cat("\nPermutation-based Variable Importance (type = 1):\n")
+print(importance(rf_full, type = 1))
+varImpPlot(rf_full)
+
+```
+
+*Interpretation*
+
+The Random Forest model was evaluated using five-fold cross-validation to better
+reflect real-world use, where models face new, unseen data. While OOB error 
+gives an internal estimate, it relies on reused training samples. External 
+validation, by testing on held-out data, offers a more realistic 
+view of generalisation.
+
+The model achieved 0.701 accuracy and a 0.313 macro F1-score, suggesting it 
+performed well on the majority class but struggled with minority ones. 
+The OOB error (0.29) was similar, but less informative about class imbalance, 
+reinforcing the use of external validation.
+
+Feature importance ranked longitude as most predictive, followed by latitude 
+and depth. This challenges the usual assumption that depth is most relevant,
+hinting that spatial location may better explain variation in earthquake magnitude.
+
+
+
+## (b) Are the model’s predictions aligned with the actual categories?
+
+*Pseudocode*
+
+Goal: Check whether the model’s predicted classes align with the actual classes, 
+and test if the difference is statistically significant.
+
+Steps:
+1. Use the predictions and true labels from the last fold in cross-validation.
+2. Create a table comparing predicted vs actual magnitude classes.
+3. Run a chi-squared test on this table.
+4. Check the p-value to determine whether the result is statistically 
+  significant at the 5% level.
+5. Based on the result, comment on whether the model’s predictions are 
+  statistically aligned with the actual categories.
+
+```{r q2b, echo=TRUE}
+
+# Just reuse the predictions and actual values from the last fold (from Q2a)
+# These were stored as 'preds' and 'actuals' at the end of the CV loop
+
+# Build a contingency table: how many predictions landed in each actual category
+summary_table <- table(Predicted = all_preds, Actual = all_actuals)
+
+# Start with a chi-squared test to check independence between predicted and actual labels
+# This tests whether the distribution of predictions matches the real data
+chi_result <- suppressWarnings(chisq.test(summary_table))
+
+# Show the expected counts under independence assumption
+# This helps us judge whether chi-squared assumptions hold
+cat("Expected counts from chi-squared test:\n")
+print(round(chi_result$expected, 2))
+
+# If any expected count is too small (<5), chi-squared may be invalid, 
+#so we switch to Fisher’s test
+if (any(chi_result$expected < 5)) {
+  cat("\nSome expected counts are <5 , switching to Fisher's Exact Test:\n")
+
+  # Fisher's exact test works better for small sample sizes or sparse tables
+  fisher_result <- fisher.test(summary_table)
+  print(fisher_result)
+
+  # Interpret the p-value: if it's less than 0.05, there's a significant difference
+  if (fisher_result$p.value < 0.05) {
+    cat("Result: Significant difference (p <", round(fisher_result$p.value, 4), ").\n")
+    cat("Interpretation: Model predictions differ meaningfully from actual categories.\n")
+  } else {
+    cat("Result: No significant difference (p =", 
+        round(fisher_result$p.value, 4), ").\n")
+    cat("Interpretation: The predicted labels are statistically aligned 
+        with the true ones.\n")
+  }
+
+} else {
+  # Chi-squared test is safe to use here since all expected values 
+  #are large enough
+  cat("\nChi-squared Test Result:\n")
+  print(chi_result)
+
+  # Same interpretation logic: check p-value against the 5% significance
+  threshold
+  if (chi_result$p.value < 0.05) {
+    cat("Result: Significant difference (p <", 
+        round(chi_result$p.value, 4), ").\n")
+    cat("Interpretation: Predictions are not statistically consistent 
+        with the actual labels.\n")
+  } else {
+    cat("Result: No significant difference 
+        (p =", round(chi_result$p.value, 4), ").\n")
+    cat("Interpretation: Model predictions are statistically in 
+        line with the actual data.\n")
+  }
+}
+
+
+
+```
+*Interpretation*
+
+To assess alignment between predicted and actual classes, I used a contingency 
+table and statistical testing. The chi-squared test was not suitable due to 
+small expected counts, especially for the 'Small' class, 
+so I used Fisher’s Exact Test instead.
+
+The null hypothesis states that predictions and actual labels are independent. 
+The resulting p-value was 0.921, which is well above the 5% threshold.
+Therefore, we fail to reject the null, meaning the model’s predictions are
+statistically consistent with the actual class distribution.
+
+## (c) XGBoost Tuned!
+
+*Pseudocode*
+
+Goal:  
+Handle class imbalance in earthquake magnitude classification using 
+probability-based predictions, nested cross-validation, 
+and weighted evaluation metrics.
+
+Steps:
+
+1. Use the same predictors as before: `depth`, `latitude`, and `longitude`.
+2. Convert the target `mag_class` (factor) into numeric labels:
+   - 0 = Small, 1 = Moderate, 2 = Large (required by XGBoost).
+3. Convert the predictors into matrix format (`as.matrix`) for compatibility with XGBoost.
+4. Randomly assign each observation into one of 5 folds for **outer cross-validation**.
+5. For each outer fold:
+   - Split the data: 4 folds for training, 1 fold for testing.
+   - Within the training folds, perform **inner 5-fold cross-validation** using `xgb.cv` to tune:
+     - `max_depth` {3, 5, 7}
+     - Optimal `nrounds` (early stopping based on log-loss)
+   - Train a final XGBoost model on the full training set using the best hyperparameters.
+   - Predict class probabilities (`softprob`) on the test set.
+   - Calculate:
+     - **Weighted macro F1-score**
+     - **Weighted accuracy**
+     (Weights are set manually per class to prioritise minority classes.)
+6. After all 5 outer folds:
+   - Compute the average weighted F1-score and accuracy.
+   - Display the best `max_depth` and `nrounds` used in each fold.
+7. Run a statistical test (chi-squared or Fisher’s exact) to check if predicted
+    labels are significantly different from actual labels.
+8. Identify the best-performing fold (based on F1).
+9. Retrain the final model on the full dataset using that fold’s best 
+    hyperparameters.
+10. Compute and print **feature importance** using the final full model.
+
+```{r q2c, echo=TRUE}
+
+set.seed(123)
+#using the same input yeah...
+quake_inputs <- as.matrix(quakes[, c("depth", "lat", "long")])
+label_mags <- as.numeric(quakes$mag_class) - 1 # Convert the target variable
+                      #into numeric labels: 0 = Small, 1 = Moderate, 2 = Large
+
+n <- nrow(quakes) #number of observations
+#prepare cross val data
+fold_ids <- sample(rep(1:5, length.out = n))
+
+# use weight (weights = c(0.8, 0.6, 0.9))) for each class to calculate 
+# weighted F1 function
+macro_f1_weighted <- function(pred, truth, weights = c(0.8, 0.6, 0.9)) {
+  mat <- table(factor(truth, levels = 0:2), factor(pred, levels = 0:2))
+  f1_each <- numeric(3)
+  for (i in 1:3) {
+    tp <- mat[i, i]
+    fp <- sum(mat[, i]) - tp
+    fn <- sum(mat[i, ]) - tp
+    p <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+    r <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+    f1_each[i] <- ifelse(p + r == 0, 0, 2 * p * r / (p + r))
+  }
+  sum(f1_each * weights)
+}
+
+# Weighted accuracy function
+weighted_accuracy <- function(pred, truth, weights = c(0.8, 0.6, 0.9)) {
+  acc_vec <- as.numeric(pred == truth)
+  weight_per_sample <- weights[truth + 1]
+  sum(acc_vec * weight_per_sample) / sum(weight_per_sample)
+}
+
+# Create empty storage for saving results
+all_preds <- rep(NA, n)   #collect all final predictions
+all_true <- label_mags        #true labels (already in numeric format)
+f1_scores <- numeric(5)   #f1-score per fold
+acc_scores <- numeric(5)    # Acc per fold
+best_depths <- integer(5)     #best-max_depth per fold
+best_roundss <- integer(5)      #best number of trees per fold
+
+# repeat for each of the 5 folds
+for (fold in 1:5) {
+  cat("Fold", fold, "\n")
+   #split into training and test indices for this fold
+  test_idx <- which(fold_ids == fold)
+  train_idx <- setdiff(1:n, test_idx)
+
+  # Inner tuning
+  best_loss <- Inf
+    best_depth <- NA 
+      best_rounds <- NA
+  
+  #lets try different tree depths
+  for (d in c(3, 5, 7)) {
+    cv_res <- xgb.cv( # # Run xgb.cv with early stopping
+      data = quake_inputs[train_idx, ],
+      label = label_mags[train_idx],
+      objective = "multi:softprob",
+      num_class = 3,
+        nrounds = 100,
+        max_depth = d,
+        nfold = 5,
+        early_stopping_rounds = 10,
+        verbose = 0
+    )
+  ## track the best log-loss and how many rounds it took
+    current_loss <- min(cv_res$evaluation_log$test_mlogloss_mean)
+    current_rounds <- which.min(cv_res$evaluation_log$test_mlogloss_mean)
+  # update if this depth is better than previous ones
+    if (current_loss < best_loss) {
+      best_loss <- current_loss
+        best_depth <- d
+          best_rounds <- current_rounds
+    }
+  }
+
+  best_depths[fold] <- best_depth
+  best_roundss[fold] <- best_rounds
+
+  cat("  Best max_depth:", best_depth, "\n")
+  cat("  Best nrounds:", best_rounds, "\n")
+
+  # Update if this depth is better than previous ones
+  final_model <- xgboost(
+    data = quake_inputs[train_idx, ],
+    label = label_mags[train_idx],
+    objective = "multi:softprob",
+        num_class = 3, #specify the num of classes
+        max_depth = best_depth, #using best depth
+        nrounds = best_rounds,#using best n rounds
+        verbose = 0
+  )
+
+  # Predict
+  pred_probs <- predict(final_model, quake_inputs[test_idx, ])
+  pred_matrix <- matrix(pred_probs, ncol = 3, byrow = TRUE) #Reshaping
+  preds <- max.col(pred_matrix) - 1 ## predicted class by picking the one 
+                                    # with highest probability
+
+  all_preds[test_idx] <- preds ## Save predictions for this fold
+
+  # Evaluate per fold and save performance
+  fold_f1 <- macro_f1_weighted(preds, label_mags[test_idx])
+  fold_acc <- weighted_accuracy(preds, label_mags[test_idx])
+
+  f1_scores[fold] <- fold_f1
+  acc_scores[fold] <- fold_acc
+
+  cat("  Weighted F1:", round(fold_f1, 3), "\n")
+  cat("  Weighted Accuracy:", round(fold_acc, 3), "\n")
+}
+
+# After CV is done, show the average performance across folds
+cat("\n--- 5-Fold Evaluation Results ---\n")
+cat("Average Weighted Macro F1:", round(mean(f1_scores), 3), "\n")
+cat("Average Weighted Accuracy:", round(mean(acc_scores), 3), "\n")
+
+# Print best params per fold
+cat("\nBest Parameters per Fold:\n")
+for (fold in 1:5) {
+  cat("  Fold", fold, "- max_depth:", best_depths[fold],
+      ", nrounds:", best_roundss[fold], "\n")
+}
+
+# if statement and checking expectation value ->>>
+#Run chi-squared test but switch to Fisher’s if expected counts are too small
+tab <- table(predicted = all_preds, actual = all_true) #are predictions aligned 
+                                                      #with actual classes?
+chi <- suppressWarnings(chisq.test(tab))
+if (any(chi$expected < 5)) {
+  cat("\nExpected counts too low , using Fisher's Exact Test:\n")
+  print(fisher.test(tab))
+} else {
+  cat("\nChi-squared Test:\n")
+  print(chi)
+}
+
+# Identify the best fold (highest F1) for final model training
+best_fold <- which.max(f1_scores)
+cat("\nBest performing fold:", best_fold, "\n")
+cat("Using max_depth =", best_depths[best_fold], 
+    "and nrounds =", best_roundss[best_fold], "\n")
+
+#lets train final model on full dataset using the best-performing fold's settings
+
+full_model_boosted <- xgboost(
+  data = quake_inputs,
+  label = label_mags,
+  objective = "multi:softprob",
+  num_class = 3,
+  max_depth = best_depths[best_fold],
+  nrounds = best_roundss[best_fold],
+  verbose = 0
+)
+
+# Show feature importance from the final model
+importance <- xgb.importance(feature_names = colnames(quake_inputs), model =
+                               full_model_boosted)
+cat("\nFeature Importance from full boosted model:\n")
+print(importance)
+
+```
+
+*Interpretation*
+
+XGBoost outperformed Random Forest, raising the weighted macro F1-score 
+from 0.31 to 0.53. This boost came from using soft classification 
+, which allowed setting higher weights for minority classes and 
+improved their recognition. F1-score is especially appropriate for imbalanced 
+data, as it reflects per-class performance rather than overall majority bias.
+
+Fisher’s exact test (p = 0.83) confirmed no significant difference between 
+predicted and actual labels, indicating reliable alignment. Feature importance 
+showed depth as the top predictor, shifting the focus from spatial features 
+(longitude, latitude) that dominated in the Random Forest model.
+
+# Question 3
+
+## 3(a) Inter-event timing using a Poisson process with exponential gaps 
+
+*Pseudocode*
+
+Goal: Simulate a Poisson arrival process for earthquakes using inter-event 
+times that follow an exponential distribution. 
+Assume the dataset spans 5 years, and model the timing of 1000 earthquakes in
+daily units.
+
+Steps:
+
+1. Count how many earthquakes are in the quakes dataset (should be 1000 rows).
+2. Assume these events happened evenly across 5 years.
+3. Convert that into a daily rate lambda by dividing number of quakes by 
+    total days (5 × 365).
+4. Use that daily lambda to simulate 1000 inter-event times from an 
+    exponential distribution.
+5. These gaps represent how long to wait between each earthquake, in days.
+6. Accumulate the gaps to calculate when each earthquake occurred, 
+    starting from day 0.
+7. Plot a histogram of the inter-event times to see the shape of the 
+    distribution (should look exponential).
+8. Optionally, look at the first few simulated quake times to check 
+    everything makes sense.
+
+
+```{r q3a, echo=TRUE}
+
+#let's simulate earthquake timings over 5 years, assuming a Poisson process
+#with exponential gaps
+set.seed(123) #small things that could make huge chaos
+# Check how many earthquake events are in the dataset
+n_quakes <- nrow(quakes)  # should be 1000 earthquakes in total
+
+# We're told to assume that this dataset covers 5 years
+# So I'll convert that into days (we're keeping it simple, 365 days per year)
+total_days <- 5 * 365
+
+# From that, we calculate the average number of quakes per day
+# This gives us the rate (lambda) for our exponential distribution
+lambda_daily <- n_quakes / total_days  # how many quakes happen per day on average
+
+# Now, we simulate 1000 inter-event times
+# These represent the number of days between each earthquake
+inter_event_time <- rexp(n = n_quakes, rate = lambda_daily)
+
+# Let’s take a look at what these time gaps look like
+# I’ll plot a histogram to get a sense of the distribution
+hist(inter_event_time,
+     breaks = 30,                  
+     col = "lightblue",            
+     border = "white",             
+       main = "Simulated Inter-Event Times of Earthquakes (in Days)", 
+       xlab = "Inter-event time (days)",                              
+       ylab = "Number of intervals")                                  
+
+# Now let’s figure out the actual time each earthquake occurred
+# We assume the first quake happened at time 0
+# Then just add up the time gaps one by one
+occurrence_time <- cumsum(inter_event_time)
+
+# Let's print the first few simulated quake times just to see what it looks like
+head(data.frame(
+  quake_number = 1:6,
+  inter_event_time = round(inter_event_time[1:6], 2), # in days
+  occurrence_time = round(occurrence_time[1:6], 2)      # in days since time 0
+), n = 6)
+
+```
+
+The histogram shows that most simulated earthquakes occur within 1-2 days of the 
+previous one, with fewer long intervals. This matches the expected pattern of an
+exponential distribution. The shape confirms the memoryless property of Poisson 
+processes: short waiting times are common, while long delays are rare.
+
+
+
+## 3(b) Earthquake arrival simulation over 6 months with cumulative visualization
+
+*Pseudocode*
+
+Goal: Build a function that simulates earthquake occurrences and their magnitudes
+for a 6-month period using a Poisson process and empirical magnitude sampling.
+
+Steps:
+
+1. Use the yearly earthquake rate (lambda) we calculated in part A.
+2. Convert that yearly rate into a daily rate since we'll simulate in days.
+3. Create a loop where we simulate one inter-event time at a time using 
+    exponential distribution.
+4. After each new inter-event time, add it to a running total (cumulative time).
+5. Keep doing this until the total time exceeds 182.5 days (6 months).
+6. For every earthquake time we simulate, sample a magnitude randomly 
+  from the original quakes dataset.
+7. Store each simulated earthquake’s time and magnitude in a table.
+8. Return the final table and maybe print the first few simulated results.
+
+```{r q3b, echo=TRUE}
+# This function simulates a Poisson arrival process for earthquake events
+# within a fixed time horizon (e.g. 0.5 years),exponential inter-arrival times.
+#Simulating Poisson quake arrivals over a 6-month period (in years)
+
+# This function simulates a Poisson arrival process for earthquake events
+# over a fixed horizon, using exponential inter-event times.
+# time is tracked in months for better interpretability.
+
+# ICA3 - Question 3(b)
+# Now i'll simulate when earthquakes might occur during the next 6 months
+set.seed(123)
+# First, grab the yearly earthquake rate we calculated earlier (from part a)
+lambda_year <- nrow(quakes) / 5  # 1000 quakes over 5 years , 200 per year
+
+# Convert that yearly rate into a daily rate since we'll simulate in days
+lambda_day <- lambda_year / 365  # now we know how often quakes happen each day
+
+# Define the maximum number of days I'm simulating,6 months=about 182.5 days
+max_days <- 182.5
+
+# I'll store all the simulated quake times here
+occurrence_time <- c()
+
+# Keep track of how much simulated time has passed so far
+current_time <- 0
+
+# Start looping to simulate each earthquake one by one
+while (current_time < max_days) {
+  # Simulate how long we wait until the next earthquake
+  next_gap <- rexp(1, rate = lambda_day)
+  # Add this gap to our running time
+  current_time <- current_time + next_gap
+    # If the new quake still fits within our 6-month window, store it
+    if (current_time <= max_days) {
+      occurrence_time <- c(occurrence_time, current_time)
+    }
+}
+
+# Create a table of the simulated earthquake events
+# 'occurrence_time_days' means how many days after the first event each 
+# quake happens
+simulated_times <- data.frame(
+  quake_number = 1:length(occurrence_time),
+  occurrence_time_days = round(occurrence_time, 2)  # time in days since the 
+                                                #start of the simulation
+)
+
+# Print the first few simulated quake times
+head(simulated_times, 6)
+# Now let's plot how many quakes have occurred over time
+plot(occurrence_time, 1:length(occurrence_time),
+     type = "s",                          # step plot shows when events happen
+     main = "Simulated Cumulative Earthquakes (Next 6 Months)",
+     xlab = "Time (days)",
+     ylab = "Cumulative number of earthquakes",
+     col = "black")
+
+```
+
+*Interpretation*
+
+The simulation shows when earthquakes occur over a 6-month window. The table 
+lists each quake’s timing (in days), starting from zero. The plot tracks 
+cumulative events over time: each upward step marks a quake, and flat segments 
+show quiet periods. This pattern matches a Poisson process, where events are 
+randomly spaced and inter-event times follow an exponential distribution.
+
+
+## 3(c) Magnitude generation via inverse CDF of a shifted exponential
+
+*Pseudocode*
+
+Goal: Assign a simulated magnitude value to each earthquake use the inverse CDF 
+method of the exponential distribution.
+
+Steps:
+
+1. Count how many earthquake times were simulated in part (b).
+2. Generate that many random numbers from a uniform(0,1) distribution.
+   These represent the CDF values (u) for the inverse transform.
+3. Use the inverse CDF formula of the exponential distribution to convert each u 
+  into a magnitude: magnitude = -log(1 - u) / b +4
+4. Choose a value for the parameter b (b = 1.3 or based on domain knowledge).
+5. Attach these magnitudes to the simulated earthquake table.
+6. Plot the simulated magnitudes over time:
+   - X-axis = time (days)
+   - Y-axis = magnitude
+   - Add a horizontal line showing the average magnitude across all events.
+7. Display the first few rows of the final table to check the output.
+
+
+```{r q3c, echo=TRUE}
+# Simulate magnitudes independently using the inverse CDF of the exponential 
+#distribution
+
+set.seed(123)
+simulate_magnitudes_inverse_cdf <- function
+  (simulated_times, b = 1.3, seed = 123) {
+      set.seed(seed)  # ensure reproducible uniform draws  
+      # Get quake IDs from previous simulation (Q3b)
+      quake_ids <- simulated_times$quake_number
+    
+      # Generate uniform(0,1) random numbers
+      u_values <- runif(nrow(simulated_times))
+      
+      # calculate inverse CDF of exponential: magnitude = -log(1 - u) / b 
+      # then, inverse CDF of exponential with +4 shift to match real quakes data
+      simulated_magnitudes <- -log(1 - u_values) / b +4
+      
+      # Create a data frame to return: quake_number + magnitude
+      magnitudes_df <- data.frame(
+        quake_number = quake_ids,
+        magnitude = round(simulated_magnitudes, 2)
+      )
+      
+      # Preview the first few values
+      cat("Simulated magnitudes (first 6 rows):\n")
+      print(head(magnitudes_df, 6))
+      
+      # Plot magnitudes only (not paired with time yet)
+      plot(magnitudes_df$quake_number, magnitudes_df$magnitude,
+           main = paste("Simulated Earthquake Magnitudes (Inverse CDF, 
+                        #b =", b, ")"),
+           xlab = "Earthquake Number",
+           ylab = "Magnitude",
+           pch = 16,
+           col = "darkblue")
+      
+      # Add reference line for average magnitude
+      abline(h = mean(magnitudes_df$magnitude), col = "red", lty = 2, lwd = 2)
+      
+      # Return the data frame for use in Q3d
+      return(magnitudes_df)
+}
+
+magnitudes_df <- simulate_magnitudes_inverse_cdf(simulated_times)
+
+```
+
+*Interpretation*
+
+Simulated magnitudes were generated using the inverse CDF of an exponential 
+distribution with b = 1.3, producing many low-magnitude events and fewer 
+large ones. As expected, the plot shows values clustered around 4-5, 
+with occasional spikes above 6 or 7. The red line represents the average 
+magnitude, just below 5. This pattern reflects the typical nature of seismic 
+data: small quakes are common, while large ones are rare.
+
+## 3(d) Merging simulated times and magnitudes into a unified forecast
+
+*Pseudocode*
+
+Goal : Combine the simulated earthquake occurrence times and magnitudes into a
+single dataframe using quake_number as the linking ID
+
+1. Take the simulated times from part 3(b), which contain quake_number and 
+  occurrence_time_days.
+2. Take the simulated magnitudes from part 3(c), which contain quake_number
+  and magnitude.
+3. Check if the 'simulated_times' dataframe already contains 'magnitude' column.
+   If it does, assume the merge has already been done and skip merging.
+4. If not yet merged:
+   - Remove any existing magnitude column in 'simulated_times'to avoid suffixes.
+   - Merge the two dataframes using quake_number as the key.
+5. After merging, sort the combined data by quake_number to preserve order.
+6. Print the first few rows of the final combined dataframe, which now includes:
+   - quake_number
+   - occurrence_time_days
+   - magnitude
+7. Calculate the maximum magnitude from the combined dataframe and print it.
+
+
+```{r q3d, echo=TRUE}
+
+# Combine the simulated times and magnitudes, then print the maximum 
+#forecasted magnitude
+
+# Step 1: Safely merge simulated times (Q3b) and magnitudes (Q3c)
+# Avoid duplicating 'magnitude' column if it has already been merged
+set.seed(123)
+if (!"magnitude" %in% names(simulated_times)) {
+  
+  # Clean simulated_times in case magnitude was added earlier
+  simulated_times_clean <- simulated_times[, !names(simulated_times)
+                                           %in% "magnitude"]
+  # Merge by quake_number
+  simulated_quakes <- merge(simulated_times_clean, magnitudes_df, 
+                            by = "quake_number")
+} else {
+  
+  simulated_quakes <- simulated_times#already merged, use directly
+}
+
+# Step 2: Reorder by quake_number just to be safe
+simulated_quakes <- simulated_quakes[order(simulated_quakes$quake_number), ]
+
+# Step 3: Print the combined result
+cat("Combined simulated earthquake data (first 6 rows):\n")
+print(head(simulated_quakes[, c("quake_number", "occurrence_time_days",
+                                "magnitude")], 6))
+# Step 4: Find and print the maximum magnitude forecasted in 6-month period
+max_mag <- max(simulated_quakes$magnitude)
+cat("\nMaximum forecasted magnitude in the next 6 months:",
+    round(max_mag, 2), "\n")
+
+```
+
+## 3(e) A full forecast function with input checks, reproducibility, and output plots.
+
+*Pseudocode*
+Goal:  
+Simulate earthquake occurrences and magnitudes over a given time period 
+(6 months) using a Poisson process and evaluate the realism of the forecast.
+
+Steps:
+1. Validate inputs:
+   - Make sure `months` and `b` are both positive values.
+2. Simulate earthquake **times**:
+   - Calculate `lambda_day` from the real dataset(1000 quakes/5 years/365 days).
+   - Convert months into days (`max_days = 365 × (months / 12)`).
+   - Use a `while` loop with exponential inter-event times (`rexp()`)
+    to simulate when earthquakes occur.
+   - Stop simulation when total days exceed `max_days`.
+
+3. Simulate earthquake **magnitudes**:
+   - Use the same number of quakes as step 2.
+   - Generate uniform random numbers (`U ~ U(0,1)`).
+   - Apply the inverse CDF of exponential distribution:  
+     `magnitude = -log(1 - U) / b + 4`.
+
+4. Combine the times and magnitudes:
+   - Merge the two data frames by `quake_number`.
+
+5. Summarise the results:
+   - Print first 6 rows of the final table.
+   - Show max magnitude and total number of forecasted quakes.
+   - Plot cumulative number of quakes over time.
+   - Plot magnitude over time, with horizontal line for average.
+
+6. Check if the forecasted **number of earthquakes** is realistic:
+   - Compute the expected number under Poisson(`lambda × time`).
+   - Compare with actual forecasted count via a barplot.
+
+7. Run a **Monte Carlo KS test**:
+   - Compute ECDFs of real vs forecasted magnitudes.
+   - Simulate KS distances from B = 1000 random samples of the same size.
+   - Calculate p-value: proportion of null KS distances ≥ observed KS distance.
+   - Visualise the null distribution with histogram + red line for observed.
+
+8. Interpretation:
+   - Use the p-value to assess whether the forecasted magnitudes deviate 
+   significantly from the real ones.
+   
+```{r q3e, echo=TRUE}
+
+set.seed(123)
+# Function that forecasts earthquake times and magnitudes over a 6-month period
+# Complete forecast function that follows 3b,3c,3d exactly
+# Includes input checks and prints required output for assessment
+
+# Final FIXED forecast function: matching quake_number for join ultra !!!
+forecast <- function(months, b, seed = 123) {
+  if (months <= 0) stop("Error: Number of months must be greater than 0.")
+  if (b <= 0) stop("Error: Parameter 'b' must be positive.")
+  set.seed(seed) # worry
+
+  # Step: Q3b , same with previous point but in company
+  max_days <- 365 * (months / 12) # convert days
+  lambda_day <- nrow(quakes) / (5 * 365) # bcs I'm using daily prediction 
+
+  occurrence_time <- c()
+  current_time <- 0
+
+  while (current_time < max_days) {
+    next_gap <- rexp(1, rate = lambda_day)
+    current_time <- current_time + next_gap #cumsum stochastic process
+    if (current_time <= max_days) {
+      occurrence_time <- c(occurrence_time, current_time)
+    }
+  }
+  simulated_times <- data.frame(
+    quake_number = 1:length(occurrence_time),
+    occurrence_time_days = round(occurrence_time, 2)
+  )
+  # Step: Q3c (keep quake_number for merge integrity)
+  set.seed(seed)  # same seed ensures same u_values as step 3c
+  quake_ids <- simulated_times$quake_number
+  u_values <- runif(length(quake_ids))
+  # Do inverse CDF of exponential with +4 shift to match real quakes data
+  simulated_magnitudes <- -log(1 - u_values) / b +4
+
+  magnitudes_df <- data.frame(
+    quake_number = quake_ids,
+    magnitude = round(simulated_magnitudes, 2)
+  )
+  # Step: Q3d
+  simulated_quakes <- merge(simulated_times, magnitudes_df, by = "quake_number")
+  simulated_quakes <- simulated_quakes[order(simulated_quakes$quake_number), ]
+
+  # provide the output
+  cat("Simulated earthquake forecast (first 6 rows):\n")
+  print(head(simulated_quakes, 6))
+
+  max_mag <- round(max(simulated_magnitudes), 2) # calculate max as requested
+  total_quakes <- nrow(simulated_quakes)
+
+  cat("\nMaximum forecasted magnitude:", max_mag, "\n")
+  cat("Total number of earthquakes forecasted:", total_quakes, "\n")
+
+  plot(simulated_quakes$occurrence_time_days,
+       simulated_quakes$quake_number,
+       type = "s",
+       main = paste("Cumulative Earthquakes Over", months, "Months"),
+       xlab = "Time (days)",
+       ylab = "Cumulative Earthquakes",
+       col = "darkgreen")
+
+  plot(simulated_quakes$occurrence_time_days,
+       simulated_quakes$magnitude,
+       main = paste("Simulated Earthquake Magnitudes Over", months, "Months"),
+       xlab = "Time (days)",
+       ylab = "Magnitude",
+       pch = 16,
+       col = "blue")
+
+  abline(h = mean(simulated_quakes$magnitude), col = "red", lty = 2)
+
+  return(simulated_quakes)
+}
+
+# Run our function startsss
+months <- 6 #yeah this one basic
+b <- 1.3 
+forecast_result <- forecast(months, b) # try our function !
+
+# next step guys, I'll check whether our forecasting data are reasonable 
+# first, check the number of simulated earthquakes
+
+expected_quakes <- lambda_day * max_days
+# ---- Compare with forecast output -----
+
+total_forecasted <- nrow(forecast_result)
+cat("Forecasted number of earthquakes:", total_forecasted, "\n")
+cat("Expected number under Poisson(lambda = ", round(lambda_day, 4), ") 
+    for", max_days, "days:", round(expected_quakes, 2), "\n")
+
+# Optional: plot to visually compare
+barplot(c(expected_quakes, total_forecasted),
+        names.arg = c("Expected", "Forecasted"),
+        col = c("darkgray", "darkgreen"),
+        ylab = "Number of Earthquakes",
+        main = "Forecast vs Expected Number of Earthquakes")
+
+# ----- Poisson probability check (optional) ----
+
+# Probability of observing this number under Poisson(lambda * t)
+prob_exact <- dpois(total_forecasted, lambda = expected_quakes)
+prob_cum <- ppois(total_forecasted, lambda = expected_quakes)
+
+cat("P(X =", total_forecasted, ") =", round(prob_exact, 5), "\n")
+cat("P(X <=", total_forecasted, ") =", round(prob_cum, 5), "\n")
+
+# now, I'll check the magnitudo forecasting
+
+# Get the forecasted earthquake magnitudes
+forecast_mags <- forecast_result$magnitude
+
+# Get the real earthquake magnitudes from the quakes dataset
+real_mags <- quakes$mag
+n <- length(forecast_mags) # Store the number of forecasted earthquakes
+
+# -------- Compute the observed KS distance --------
+# this time I want extra !!!
+
+# Create the empirical cumulative distribution function (ECDF) from the 
+# forecasted magnitudes
+ecdf_forecast <- ecdf(forecast_mags)
+
+# Create the ECDF from the real magnitudes
+ecdf_real <- ecdf(real_mags)
+
+# Create a common grid combining values from both datasets for fair comparison
+grid <- sort(c(forecast_mags, real_mags))
+
+# Compute the observed KS distance: the maximum absolute difference 
+#between the two ECDFs
+ks_obs <- max(abs(ecdf_forecast(grid) - ecdf_real(grid)))
+
+# -------- Generate the Monte Carlo null distribution --------
+
+# Set the number of Monte Carlo simulations
+B <- 1000
+
+# Simulate B pairs of samples from the same theoretical exponential distribution
+# This creates the null distribution of KS distances
+null_stats <- replicate(B, {
+  # Generate two random samples of size n, using inverse transform of exponential
+  u1 <- runif(n)
+  u2 <- runif(n)
+
+  # Use the inverse CDF of exponential distribution, with estimated 
+  # rate = 1 / mean(real data)
+  sim1 <- -log(1 - u1) / (1 / mean(real_mags))
+  sim2 <- -log(1 - u2) / (1 / mean(real_mags))
+
+  # Create ECDFs from both simulated samples
+  ecdf1 <- ecdf(sim1)
+  ecdf2 <- ecdf(sim2)
+
+# Compute the maximum difference between ECDFs (KS distance) 
+  # for this simulated pair
+  max(abs(ecdf1(grid) - ecdf2(grid)))
+})
+
+# -------- Step 3: Calculate the p-value --------
+
+# Compute how many simulated KS distances are greater than or equal 
+# to the observed one
+p_val <- mean(null_stats >= ks_obs)
+
+# Print the p-value
+cat("Monte Carlo p-value (KS distance):", round(p_val, 4), "\n")
+
+# -------- Step 4: Plot the null distribution and observed value --------
+
+# Plot histogram of the null distribution of KS distances
+hist(null_stats,
+     main = "Null Distribution of KS Distance",
+     xlab = "KS Distance",
+     col = "lightblue", border = "white")
+
+# Add a red vertical line showing the observed KS distance
+abline(v = ks_obs, col = "red", lwd = 2)
+
+# Add legend for clarity
+legend("topright", legend = "Observed KS", col = "red", lwd = 2)
+
+```
+
+*Interpretation*
+
+This forecast is remarkably well-aligned with real-world patterns. 
+Over a 6-month period, the simulation generated 94 earthquakes, which is 
+impressively close to the expected 100 under a Poisson process with lambda 
+about 0.5479/day. Statistically, this count is highly plausible 
+(P(X <= 94) = 0.295), and there is no sign of under-or overestimation (proof of reasonable forecast).
+
+Magnitudes were simulated using a shifted exponential distribution (b = 1.3), 
+capped by a maximum of 7.97. The Monte Carlo KS test returned a p-value of 0.12, 
+confirming that the simulated magnitude distribution is consistent 
+with the real data, not just visually, but statistically.
+
+The cumulative event plot reveals a steady, near-linear increase in events, 
+perfectly capturing the memoryless nature of the Poisson process. 
+Overall, both the timing and severity of the forecasted earthquakes mirror 
+real seismic behavior.There is no statistical reason to doubt this forecast,
+it is not only realistic, it is robust.
